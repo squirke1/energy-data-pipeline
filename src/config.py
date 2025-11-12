@@ -9,9 +9,11 @@ PROCESSED_DATA_DIR = DATA_DIR / "processed"
 RAW_DATA_DIR.mkdir(parents=True, exist_ok=True)
 PROCESSED_DATA_DIR.mkdir(parents=True, exist_ok=True)
 
-EIRGRID_BASE_URL = "https://www.smartgriddashboard.com/DashboardService.svc"
+# Note: EirGrid API endpoints may require authentication or be temporarily unavailable
+# Use --mock flag for development/testing
+EIRGRID_BASE_URL = "https://smartgriddashboard.eirgrid.com/DashboardService.svc"
 EIRGRID_ENDPOINTS = {
-    "generation": f"{EIRGRID_BASE_URL}/generationdata",
+    "generation": f"{EIRGRID_BASE_URL}/data",
     "co2": f"{EIRGRID_BASE_URL}/co2",
     "frequency": f"{EIRGRID_BASE_URL}/frequency",
     "demand": f"{EIRGRID_BASE_URL}/demand",

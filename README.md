@@ -55,15 +55,17 @@ energy-data-pipeline/
 
 ### Ingesting Data
 
-**With Live API:**
+**With Mock Data (recommended for development):**
+```bash
+python src/ingest_eirgrid.py --mock
+```
+
+**With Live API (when available):**
 ```bash
 python src/ingest_eirgrid.py
 ```
 
-**With Mock Data (for testing):**
-```bash
-python src/ingest_eirgrid.py --mock
-```
+> **Note:** The EirGrid API endpoints may be temporarily unavailable or require authentication. Use `--mock` flag for development and testing.
 
 **Programmatic Usage:**
 ```python
