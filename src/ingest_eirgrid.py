@@ -104,7 +104,7 @@ def ingest_generation_data(save_format: str = "json",
         if isinstance(data, dict) and data.get("Rows"):
             logger.info(f"Ingested {len(data['Rows'])} rows to {filepath}")
         else:
-            logger.warning(f"No data rows in response")
+            logger.warning("No data rows in response")
         
         return filepath
         
