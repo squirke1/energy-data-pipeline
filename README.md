@@ -1,6 +1,6 @@
 # Energy Data Pipeline
 
-A Python-based ETL pipeline for ingesting, transforming, and analyzing energy generation data from EirGrid's Smart Grid Dashboard.
+A Python-based ETL pipeline for ingesting, transforming, and analyzing energy generation data from ENTSO-E (European Network of Transmission System Operators for Electricity).
 
 ## Project Structure
 
@@ -8,7 +8,7 @@ A Python-based ETL pipeline for ingesting, transforming, and analyzing energy ge
 energy-data-pipeline/
 ├── src/
 │   ├── config.py              # Configuration settings
-│   ├── ingest_eirgrid.py      # Data ingestion from EirGrid API
+│   ├── ingest_entsoe.py       # Data ingestion from ENTSO-E API
 │   ├── transform_energy.py    # Data transformation logic
 │   ├── validate.py            # Data validation
 │   ├── load_db.py             # Database loading
@@ -24,11 +24,11 @@ energy-data-pipeline/
 ## Features
 
 ### ✅ Stage 1: Data Ingestion (Completed)
-- Fetches data from EirGrid REST API endpoints
-- Saves raw data as JSON or CSV in `/data/raw`
-- Comprehensive error handling and retry logic
-- Logging for all operations
-- Mock data mode for testing when API is unavailable
+- Fetches generation data from ENTSO-E Transparency Platform
+- Saves raw data as CSV or JSON in `/data/raw`
+- Supports Irish (IE) electricity market data
+- Comprehensive error handling and logging
+- Mock data mode for testing without API key
 
 ## Installation
 
@@ -57,25 +57,27 @@ energy-data-pipeline/
 
 **With Mock Data (recommended for development):**
 ```bash
-python src/ingest_eirgrid.py --mock
+python src/ingest_entsoe.py --mock
 ```
 
-**With Live API (when available):**
+**With Live ENTSO-E API:**
 ```bash
-python src/ingest_eirgrid.py
+export ENTSOE_API_KEY="your_api_key_here"
+python src/ingest_entsoe.py
 ```
 
-> **Note:** The EirGrid API endpoints may be temporarily unavailable or require authentication. Use `--mock` flag for development and testing.
+> **Note:** Get your free ENTSO-E API key from [https://transparency.entsoe.eu](https://transparency.entsoe.eu). The key provides access to European electricity generation, load, and pricing data.
 
 **Programmatic Usage:**
 ```python
-from src.ingest_eirgrid import ingest_generation_data, ingest_all_endpoints
+from src.ingest_entsoe import ingest_generation_data
+import os
 
-# Ingest generation data
-filepath = ingest_generation_data(save_format="json")
+# Set API key
+os.environ["ENTSOE_API_KEY"] = "your_key_here"
 
-# Ingest from all endpoints
-results = ingest_all_endpoints(save_format="csv")
+# Ingest last 24 hours of generation data
+filepath = ingest_generation_data(hours_back=24, save_format="csv")
 ```
 
 ## Testing
