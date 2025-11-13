@@ -51,6 +51,15 @@ energy-data-pipeline/
    pip install -r requirements.txt
    ```
 
+4. **Configure ENTSO-E API**
+   - Register at https://transparency.entsoe.eu/
+   - Get your API token from Account Settings
+   - Copy `.env.example` to `.env` and add your key:
+   ```bash
+   cp .env.example .env
+   # Edit .env and add: ENTSOE_API_KEY=your_actual_key_here
+   ```
+
 ## Usage
 
 ### Ingesting Data

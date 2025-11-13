@@ -6,6 +6,7 @@ from typing import Optional
 
 import pandas as pd
 from entsoe import EntsoePandasClient
+from dotenv import load_dotenv
 
 from config import (
     RAW_DATA_DIR,
@@ -13,6 +14,8 @@ from config import (
     LOG_DATE_FORMAT,
     LOG_LEVEL,
 )
+
+load_dotenv()
 
 logging.basicConfig(level=LOG_LEVEL, format=LOG_FORMAT, datefmt=LOG_DATE_FORMAT)
 logger = logging.getLogger(__name__)
