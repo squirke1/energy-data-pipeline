@@ -2,14 +2,37 @@
 
 ## Step 1: Register and Get API Key
 
+### If you DON'T have an account yet:
+
 1. Go to https://transparency.entsoe.eu/
 2. Click "Login" in top right corner
-3. Click "Register" to create a new account
-4. Fill in your details and verify your email
-5. Once logged in, click your username → "Account Settings"
-6. Look for "Web API Security Token" section
-7. Click "Generate a new token"
-8. Copy your token (long alphanumeric string)
+3. Click "Register" below the login form
+4. Fill in your details:
+   - First Name, Last Name
+   - Email address
+   - Company/Organization (can be "Personal" or "Student")
+   - Country
+5. Accept terms and submit
+6. **IMPORTANT:** Check your email and click the verification link
+7. After email verification, log in to the platform
+
+### If you already have an account:
+
+1. Go to https://transparency.entsoe.eu/
+2. Click "Login" and enter your credentials
+3. **Check your email** - you should have received a verification email when you registered
+4. Click the verification link in that email if you haven't already
+5. After verification, the "Web API Security Token" option should appear
+
+### Getting the Token:
+
+1. Once logged in and verified, click your email/username in top right
+2. Select "Web API" from the dropdown menu (NOT "Account Settings")
+3. You should see "Generate a new security token" button
+4. Click it and copy your token (long alphanumeric string)
+5. Keep this token safe - you'll need it for the pipeline
+
+**Note:** The token section only appears after email verification is complete!
 
 ## Step 2: Configure Your Pipeline
 
