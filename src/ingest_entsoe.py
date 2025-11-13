@@ -5,7 +5,7 @@ from pathlib import Path
 from typing import Optional
 
 import pandas as pd
-from entsoe import EntsoePandasClient
+from entsoe.entsoe import EntsoePandasClient
 from dotenv import load_dotenv
 
 from config import (
