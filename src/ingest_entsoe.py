@@ -1,8 +1,7 @@
 import os
 import logging
-from datetime import datetime, timedelta
+from datetime import datetime
 from pathlib import Path
-from typing import Optional
 
 import pandas as pd
 from entsoe.entsoe import EntsoePandasClient
@@ -44,7 +43,7 @@ def fetch_generation(
     try:
         client = get_entsoe_client()
         df = client.query_generation(country_code=country_code, start=start, end=end)
-        df.index = df.index.tz_convert("Europe/Dublin")
+        df.index = df.index.tz_convert("Europe/Dublin")  # type: ignore[attr-defined]
         df["country_code"] = country_code
         logger.info(f"Fetched {len(df)} rows")
         return df
