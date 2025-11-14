@@ -38,21 +38,14 @@ jobs:
 
       - name: Install dependencies
         run: |
-          if [ -s requirements.txt ]; then
-            pip install -r requirements.txt
-          else
-            echo "requirements.txt empty, skipping install"
-          fi
+          pip install -r requirements.txt
+          pip install pytest ruff
 
       - name: Run lint (ruff)
-        run: |
-          pip install ruff
-          ruff check src tests
+        run: ruff check src tests
 
       - name: Run tests
-        run: |
-          python3 -m pip install pytest
-          python3 -m pytest --maxfail=1 --disable-warnings -q
+        run: pytest tests/ -v
 
   package:
     name: Package artifact

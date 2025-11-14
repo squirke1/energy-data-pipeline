@@ -9,9 +9,14 @@ PROCESSED_DATA_DIR = DATA_DIR / "processed"
 RAW_DATA_DIR.mkdir(parents=True, exist_ok=True)
 PROCESSED_DATA_DIR.mkdir(parents=True, exist_ok=True)
 
+# ENTSO-E API Configuration
+# Get API key from: https://transparency.entsoe.eu/content/static_content/Static%20content/web%20api/Guide.html
+ENTSOE_COUNTRY_CODE = "IE"  # Ireland
+
+# Legacy EirGrid endpoints (deprecated, kept for backward compatibility)
 EIRGRID_BASE_URL = "https://www.smartgriddashboard.com/DashboardService.svc"
 EIRGRID_ENDPOINTS = {
-    "generation": f"{EIRGRID_BASE_URL}/generationdata",
+    "generation": f"{EIRGRID_BASE_URL}/data",
     "co2": f"{EIRGRID_BASE_URL}/co2",
     "frequency": f"{EIRGRID_BASE_URL}/frequency",
     "demand": f"{EIRGRID_BASE_URL}/demand",

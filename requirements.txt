@@ -1,6 +1,8 @@
 # Core dependencies
 requests>=2.31.0
 pandas>=2.0.0
+entsoe-py>=0.5.10
+python-dotenv>=1.0.0
 
 # Development and testing
 pytest>=7.4.0
