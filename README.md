@@ -1,34 +1,61 @@
 # Energy Data Pipeline
 
-A Python-based ETL pipeline for ingesting, transforming, and analyzing energy generation data from ENTSO-E (European Network of Transmission System Operators for Electricity).
+Python ETL pipeline for European electricity generation data from the ENTSO-E API with automated testing and CI/CD.
+
+Raw generation data is fetched from the [ENTSO-E Transparency Platform](https://transparency.entsoe.eu/), validated, transformed into a clean analytical schema, and persisted to a local SQLite database.
 
 ## Project Structure
 
 ```
 energy-data-pipeline/
 ├── src/
-│   ├── config.py              # Configuration settings
-│   ├── ingest_entsoe.py       # Data ingestion from ENTSO-E API
-│   ├── transform_energy.py    # Data transformation logic
-│   ├── validate.py            # Data validation
-│   ├── load_db.py             # Database loading
-│   └── orchestrate.py         # Pipeline orchestration
+│   ├── config.py              # Paths, API endpoints, logging config
+│   ├── ingest_entsoe.py       # ENTSO-E API ingestion
+│   ├── ingest_eirgrid.py      # EirGrid API ingestion (legacy)
+│   ├── validate.py            # Input data validation
+│   ├── transform_energy.py    # Reshaping, renewable flags, carbon intensity
+│   ├── load_db.py             # SQLite persistence
+│   └── orchestrate.py        # End-to-end pipeline runner
 ├── data/
-│   ├── raw/                   # Raw ingested data
-│   └── processed/             # Transformed data
-├── tests/                     # Unit tests
+│   ├── raw/                   # Raw ingested data (CSV/JSON)
+│   ├── processed/             # Processed data
+│   └── energy.db              # SQLite database (created on first run)
+├── tests/                     # Unit tests (55 tests)
 ├── notebooks/                 # Jupyter notebooks for analysis
-└── .github/workflows/         # CI/CD pipelines
+└── .github/workflows/ci.yml   # GitHub Actions CI/CD
 ```
 
-## Features
+## Pipeline Stages
 
-### ✅ Stage 1: Data Ingestion (Completed)
-- Fetches generation data from ENTSO-E Transparency Platform
-- Saves raw data as CSV or JSON in `/data/raw`
-- Supports Irish (IE) electricity market data
-- Comprehensive error handling and logging
-- Mock data mode for testing without API key
+| Stage | Module | Description |
+|-------|--------|-------------|
+| Ingest | `ingest_entsoe.py` | Fetches generation data from ENTSO-E API |
+| Validate | `validate.py` | Checks schema, ranges, nulls, duplicates |
+| Transform | `transform_energy.py` | Wide→long melt, renewable flag, carbon intensity |
+| Load | `load_db.py` | Upserts into SQLite (`generation_fact`, `generation_summary`) |
+| Orchestrate | `orchestrate.py` | Runs all stages end-to-end |
+
+### What the transform stage produces
+
+**`generation_fact`** — one row per timestamp × fuel type:
+
+| column | type | notes |
+|--------|------|-------|
+| timestamp | TEXT | 15-min intervals |
+| country_code | TEXT | e.g. `IE` |
+| fuel_type | TEXT | e.g. `Wind Onshore` |
+| generation_mw | REAL | clipped to ≥ 0 |
+| is_renewable | INTEGER | 1 for wind, solar, hydro, etc. |
+| processed_at | TEXT | UTC timestamp of pipeline run |
+
+**`generation_summary`** — one row per timestamp:
+
+| column | type | notes |
+|--------|------|-------|
+| total_generation_mw | REAL | sum across all fuel types |
+| renewable_mw | REAL | sum of renewable sources |
+| renewable_pct | REAL | `renewable_mw / total * 100` |
+| carbon_intensity_g_per_kwh | REAL | weighted avg using per-fuel emission factors |
 
 ## Installation
 
@@ -41,9 +68,8 @@ energy-data-pipeline/
 2. **Create and activate virtual environment**
    ```bash
    python3 -m venv .venv
-   source .venv/bin/activate  # On macOS/Linux
-   # or
-   .venv\Scripts\activate  # On Windows
+   source .venv/bin/activate  # Linux/macOS
+   .venv\Scripts\activate      # Windows
    ```
 
 3. **Install dependencies**
@@ -51,113 +77,95 @@ energy-data-pipeline/
    pip install -r requirements.txt
    ```
 
-4. **Configure ENTSO-E API**
+4. **Configure ENTSO-E API key** (skip if using mock data)
    - Register at https://transparency.entsoe.eu/
-   - Get your API token from Account Settings
-   - Copy `.env.example` to `.env` and add your key:
+   - Copy `.env.example` to `.env` and fill in your key:
    ```bash
    cp .env.example .env
-   # Edit .env and add: ENTSOE_API_KEY=your_actual_key_here
+   # ENTSOE_API_KEY=your_actual_key_here
    ```
 
 ## Usage
 
-### Ingesting Data
+### Run the full pipeline
 
-**With Mock Data (recommended for development):**
 ```bash
+# Both sources, mock data (no API key needed)
+python src/orchestrate.py --mock both
+
+# ENTSO-E source only, last 24 hours of live data
+python src/orchestrate.py entsoe
+
+# EirGrid source only
+python src/orchestrate.py eirgrid
+```
+
+### Run individual stages
+
+```bash
+# Ingest only
 python src/ingest_entsoe.py --mock
+
+# Validate raw CSV
+python -c "
+import pandas as pd, sys
+sys.path.insert(0, 'src')
+from validate import validate_generation_df
+df = pd.read_csv('data/raw/entsoe_generation_<timestamp>.csv', index_col=0, parse_dates=True)
+result = validate_generation_df(df)
+print(result.summary())
+"
 ```
 
-**With Live ENTSO-E API:**
-```bash
-export ENTSOE_API_KEY="your_api_key_here"
-python src/ingest_entsoe.py
-```
+### Programmatic API
 
-> **Note:** Get your free ENTSO-E API key from [https://transparency.entsoe.eu](https://transparency.entsoe.eu). The key provides access to European electricity generation, load, and pricing data.
-
-**Programmatic Usage:**
 ```python
-from src.ingest_entsoe import ingest_generation_data
-import os
+import sys
+sys.path.insert(0, "src")
 
-# Set API key
-os.environ["ENTSOE_API_KEY"] = "your_key_here"
+from orchestrate import run_entsoe_pipeline
 
-# Ingest last 24 hours of generation data
-filepath = ingest_generation_data(hours_back=24, save_format="csv")
+# Run with mock data
+result = run_entsoe_pipeline(hours_back=24, mock=True)
+print(result)
+# {'status': 'success', 'source': 'entsoe', 'fact_rows': 291, 'summary_rows': 97, ...}
+
+# Query the database
+from load_db import query_generation_summary
+df = query_generation_summary(country_code="IE", limit=48)
+print(df[["timestamp", "renewable_pct", "carbon_intensity_g_per_kwh"]])
 ```
 
 ## Testing
 
-Run all tests:
 ```bash
+# Run all 55 tests
 pytest tests/ -v
-```
 
-Run specific test file:
-```bash
+# Run by module
 pytest tests/test_ingest.py -v
+pytest tests/test_transform.py -v
+pytest tests/test_load.py -v
 ```
 
 ## CI/CD
 
-This project uses GitHub Actions with GitFlow workflow:
-- **main** - Production branch
-- **develop** - Integration branch
-- **feature/** - Feature branches
-- **release/** - Release preparation
-- **hotfix/** - Urgent production fixes
+GitHub Actions runs on push and pull request to `main`, `develop`, `feature/**`, `release/**`, and `hotfix/**`:
 
-CI pipeline runs on all branches and includes:
-- Linting with `ruff`
-- Unit tests with `pytest`
-- Artifact packaging (main branch only)
-
-## Development
-
-### Code Quality
-
-Lint code:
-```bash
-ruff check src tests
-```
-
-### Git Workflow
-
-1. Create feature branch from `develop`:
-   ```bash
-   git checkout develop
-   git checkout -b feature/your-feature-name
-   ```
-
-2. Make changes and commit:
-   ```bash
-   git add .
-   git commit -m "Description of changes"
-   ```
-
-3. Push and create PR to `develop`:
-   ```bash
-   git push origin feature/your-feature-name
-   ```
+1. **Lint** — `ruff check src tests`
+2. **Test** — `pytest tests/ -v` on Python 3.10 and 3.11
+3. **Package** — tarballs `src/` + `requirements.txt` as a build artifact (main/release/hotfix branches only)
 
 ## Configuration
 
-Edit `src/config.py` to customize:
-- API endpoints
-- Data storage paths
-- Logging levels
-- Request timeouts and retry settings
+`src/config.py` controls:
 
-## Next Steps
-
-- [ ] Stage 2: Data Transformation
-- [ ] Stage 3: Data Validation
-- [ ] Stage 4: Database Loading
-- [ ] Stage 5: Pipeline Orchestration
-- [ ] Stage 6: Analysis Notebooks
+| variable | default | description |
+|----------|---------|-------------|
+| `ENTSOE_COUNTRY_CODE` | `IE` | Country for API queries |
+| `REQUEST_TIMEOUT` | `30` | HTTP timeout (seconds) |
+| `MAX_RETRIES` | `3` | Retries on transient failures |
+| `LOG_LEVEL` | `INFO` | Override with `LOG_LEVEL=DEBUG` env var |
 
 ## License
 
