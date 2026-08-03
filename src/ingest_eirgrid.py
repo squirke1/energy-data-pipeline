@@ -8,16 +8,28 @@ from typing import Dict, Optional, Any
 import requests
 import pandas as pd
 
-from config import (
-    EIRGRID_ENDPOINTS,
-    RAW_DATA_DIR,
-    REQUEST_TIMEOUT,
-    MAX_RETRIES,
-    RETRY_DELAY,
-    LOG_FORMAT,
-    LOG_DATE_FORMAT,
-    LOG_LEVEL,
-)
+try:
+    from src.config import (
+        EIRGRID_ENDPOINTS,
+        RAW_DATA_DIR,
+        REQUEST_TIMEOUT,
+        MAX_RETRIES,
+        RETRY_DELAY,
+        LOG_FORMAT,
+        LOG_DATE_FORMAT,
+        LOG_LEVEL,
+    )
+except ImportError:
+    from config import (
+        EIRGRID_ENDPOINTS,
+        RAW_DATA_DIR,
+        REQUEST_TIMEOUT,
+        MAX_RETRIES,
+        RETRY_DELAY,
+        LOG_FORMAT,
+        LOG_DATE_FORMAT,
+        LOG_LEVEL,
+    )
 
 logging.basicConfig(level=LOG_LEVEL, format=LOG_FORMAT, datefmt=LOG_DATE_FORMAT)
 logger = logging.getLogger(__name__)

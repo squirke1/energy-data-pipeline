@@ -7,12 +7,20 @@ import pandas as pd
 from entsoe.entsoe import EntsoePandasClient
 from dotenv import load_dotenv
 
-from config import (
-    RAW_DATA_DIR,
-    LOG_FORMAT,
-    LOG_DATE_FORMAT,
-    LOG_LEVEL,
-)
+try:
+    from src.config import (
+        RAW_DATA_DIR,
+        LOG_FORMAT,
+        LOG_DATE_FORMAT,
+        LOG_LEVEL,
+    )
+except ImportError:
+    from config import (
+        RAW_DATA_DIR,
+        LOG_FORMAT,
+        LOG_DATE_FORMAT,
+        LOG_LEVEL,
+    )
 
 load_dotenv()
 
