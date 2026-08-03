@@ -2,7 +2,7 @@ import logging
 
 import pandas as pd
 
-from config import LOG_FORMAT, LOG_DATE_FORMAT, LOG_LEVEL
+from config import LOG_DATE_FORMAT, LOG_FORMAT, LOG_LEVEL
 
 logging.basicConfig(level=LOG_LEVEL, format=LOG_FORMAT, datefmt=LOG_DATE_FORMAT)
 logger = logging.getLogger(__name__)

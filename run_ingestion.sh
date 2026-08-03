@@ -1,6 +1,8 @@
 #!/bin/bash
-# Set your ENTSO-E API key here
-export ENTSOE_API_KEY="your_key_here"
+# Loads ENTSOE_API_KEY from .env (see .env.example / ENTSOE_SETUP.md)
+set -a
+source .env
+set +a
 
 # Run the ingestion
 python src/ingest_entsoe.py

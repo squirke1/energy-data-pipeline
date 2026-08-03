@@ -1,12 +1,12 @@
 import logging
 import sqlite3
+from collections.abc import Generator
 from contextlib import contextmanager
 from pathlib import Path
-from typing import Generator, Optional
 
 import pandas as pd
 
-from config import DATA_DIR, LOG_FORMAT, LOG_DATE_FORMAT, LOG_LEVEL
+from config import DATA_DIR, LOG_DATE_FORMAT, LOG_FORMAT, LOG_LEVEL
 
 logging.basicConfig(level=LOG_LEVEL, format=LOG_FORMAT, datefmt=LOG_DATE_FORMAT)
 logger = logging.getLogger(__name__)
@@ -150,7 +150,7 @@ def log_pipeline_run(
     source: str,
     rows_loaded: int,
     status: str,
-    message: Optional[str] = None,
+    message: str | None = None,
     db_path: Path = DB_PATH,
 ) -> None:
     with get_connection(db_path) as conn:

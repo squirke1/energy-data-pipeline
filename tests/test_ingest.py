@@ -1,16 +1,17 @@
-import pytest
-from pathlib import Path
-from unittest.mock import Mock, patch, mock_open
 import sys
+from pathlib import Path
+from unittest.mock import Mock, mock_open, patch
+
+import pytest
 
 sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 
 from ingest_eirgrid import (
-    fetch_eirgrid_data,
-    save_raw_data,
-    ingest_generation_data,
-    ingest_all_endpoints,
     EirGridIngestionError,
+    fetch_eirgrid_data,
+    ingest_all_endpoints,
+    ingest_generation_data,
+    save_raw_data,
 )
 
 

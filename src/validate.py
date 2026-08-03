@@ -1,10 +1,9 @@
 import logging
 from dataclasses import dataclass, field
-from typing import List
 
 import pandas as pd
 
-from config import LOG_FORMAT, LOG_DATE_FORMAT, LOG_LEVEL
+from config import LOG_DATE_FORMAT, LOG_FORMAT, LOG_LEVEL
 
 logging.basicConfig(level=LOG_LEVEL, format=LOG_FORMAT, datefmt=LOG_DATE_FORMAT)
 logger = logging.getLogger(__name__)
@@ -16,8 +15,8 @@ MAX_GENERATION_MW = 20_000.0
 @dataclass
 class ValidationResult:
     passed: bool
-    errors: List[str] = field(default_factory=list)
-    warnings: List[str] = field(default_factory=list)
+    errors: list[str] = field(default_factory=list)
+    warnings: list[str] = field(default_factory=list)
     row_count: int = 0
 
     def add_error(self, msg: str) -> None:

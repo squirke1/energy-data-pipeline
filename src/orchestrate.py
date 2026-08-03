@@ -3,18 +3,27 @@ import sys
 
 import pandas as pd
 
-from config import LOG_FORMAT, LOG_DATE_FORMAT, LOG_LEVEL
+from config import LOG_DATE_FORMAT, LOG_FORMAT, LOG_LEVEL
 from ingest_eirgrid import (
     EirGridIngestionError,
     fetch_eirgrid_data,
+)
+from ingest_eirgrid import (
     generate_mock_data as eirgrid_mock,
 )
 from ingest_entsoe import (
     EntsoeIngestionError,
     fetch_generation,
+)
+from ingest_entsoe import (
     generate_mock_data as entsoe_mock,
 )
-from load_db import init_db, load_generation_fact, load_generation_summary, log_pipeline_run
+from load_db import (
+    init_db,
+    load_generation_fact,
+    load_generation_summary,
+    log_pipeline_run,
+)
 from transform_energy import transform_eirgrid_generation, transform_entsoe_generation
 from validate import validate_eirgrid_response, validate_generation_df
 
@@ -108,12 +117,12 @@ if __name__ == "__main__":
         try:
             result = run_entsoe_pipeline(mock=use_mock)
             print(f"ENTSOE: {result}")
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001 - top-level CLI catch-all so eirgrid can still run
             print(f"ENTSOE failed: {e}")
 
     if source in ("eirgrid", "both"):
         try:
             result = run_eirgrid_pipeline(mock=use_mock)
             print(f"EirGrid: {result}")
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001 - top-level CLI catch-all
             print(f"EirGrid failed: {e}")
