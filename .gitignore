@@ -51,3 +51,6 @@ htmlcov/
 
 # Environment variables
 .env
+
+# Local notes
+BLOG.md
