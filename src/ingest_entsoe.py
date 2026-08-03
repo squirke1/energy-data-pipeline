@@ -1,25 +1,25 @@
-import os
 import logging
+import os
 from datetime import datetime
 from pathlib import Path
 
 import pandas as pd
-from entsoe.entsoe import EntsoePandasClient
 from dotenv import load_dotenv
+from entsoe.entsoe import EntsoePandasClient
 
 try:
     from src.config import (
-        RAW_DATA_DIR,
-        LOG_FORMAT,
         LOG_DATE_FORMAT,
+        LOG_FORMAT,
         LOG_LEVEL,
+        RAW_DATA_DIR,
     )
 except ImportError:
     from config import (
-        RAW_DATA_DIR,
-        LOG_FORMAT,
         LOG_DATE_FORMAT,
+        LOG_FORMAT,
         LOG_LEVEL,
+        RAW_DATA_DIR,
     )
 
 load_dotenv()
@@ -61,7 +61,7 @@ def fetch_generation(
 
 
 def save_generation_data(df: pd.DataFrame, format: str = "csv") -> Path:
-    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")  # noqa: DTZ005 - local time is fine for a filename
     filename = f"entsoe_generation_{timestamp}.{format}"
     filepath = RAW_DATA_DIR / filename
     

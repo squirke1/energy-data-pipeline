@@ -3,32 +3,32 @@ import logging
 import time
 from datetime import datetime
 from pathlib import Path
-from typing import Dict, Optional, Any
+from typing import Any
 
-import requests
 import pandas as pd
+import requests
 
 try:
     from src.config import (
         EIRGRID_ENDPOINTS,
+        LOG_DATE_FORMAT,
+        LOG_FORMAT,
+        LOG_LEVEL,
+        MAX_RETRIES,
         RAW_DATA_DIR,
         REQUEST_TIMEOUT,
-        MAX_RETRIES,
         RETRY_DELAY,
-        LOG_FORMAT,
-        LOG_DATE_FORMAT,
-        LOG_LEVEL,
     )
 except ImportError:
     from config import (
         EIRGRID_ENDPOINTS,
+        LOG_DATE_FORMAT,
+        LOG_FORMAT,
+        LOG_LEVEL,
+        MAX_RETRIES,
         RAW_DATA_DIR,
         REQUEST_TIMEOUT,
-        MAX_RETRIES,
         RETRY_DELAY,
-        LOG_FORMAT,
-        LOG_DATE_FORMAT,
-        LOG_LEVEL,
     )
 
 logging.basicConfig(level=LOG_LEVEL, format=LOG_FORMAT, datefmt=LOG_DATE_FORMAT)
@@ -39,8 +39,8 @@ class EirGridIngestionError(Exception):
     pass
 
 
-def fetch_eirgrid_data(endpoint_name: str, params: Optional[Dict[str, Any]] = None, 
-                       retry_count: int = 0) -> Dict[str, Any]:
+def fetch_eirgrid_data(endpoint_name: str, params: dict[str, Any] | None = None, 
+                       retry_count: int = 0) -> dict[str, Any]:
     if endpoint_name not in EIRGRID_ENDPOINTS:
         raise EirGridIngestionError(
             f"Unknown endpoint: {endpoint_name}. "
@@ -80,8 +80,8 @@ def fetch_eirgrid_data(endpoint_name: str, params: Optional[Dict[str, Any]] = No
         raise EirGridIngestionError("Invalid JSON response") from e
 
 
-def save_raw_data(data: Dict[str, Any], endpoint_name: str, format: str = "json") -> Path:
-    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+def save_raw_data(data: dict[str, Any], endpoint_name: str, format: str = "json") -> Path:
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")  # noqa: DTZ005 - local time is fine for a filename
     filename = f"{endpoint_name}_{timestamp}.{format}"
     filepath = RAW_DATA_DIR / filename
     
@@ -104,7 +104,7 @@ def save_raw_data(data: Dict[str, Any], endpoint_name: str, format: str = "json"
 
 
 def ingest_generation_data(save_format: str = "json", 
-                          params: Optional[Dict[str, Any]] = None) -> Path:
+                          params: dict[str, Any] | None = None) -> Path:
     try:
         data = fetch_eirgrid_data("generation", params)
         
@@ -125,10 +125,10 @@ def ingest_generation_data(save_format: str = "json",
         raise
 
 
-def ingest_all_endpoints(save_format: str = "json") -> Dict[str, Path]:
+def ingest_all_endpoints(save_format: str = "json") -> dict[str, Path]:
     results = {}
     
-    for endpoint_name in EIRGRID_ENDPOINTS.keys():
+    for endpoint_name in EIRGRID_ENDPOINTS:
         try:
             data = fetch_eirgrid_data(endpoint_name)
             filepath = save_raw_data(data, endpoint_name, save_format)
@@ -142,7 +142,7 @@ def ingest_all_endpoints(save_format: str = "json") -> Dict[str, Path]:
     return results
 
 
-def generate_mock_data() -> Dict[str, Any]:
+def generate_mock_data() -> dict[str, Any]:
     return {
         "Rows": [
             {"FieldName": "Wind", "Value": "1234", "Percent": "25.5"},
@@ -152,7 +152,7 @@ def generate_mock_data() -> Dict[str, Any]:
             {"FieldName": "Solar", "Value": "80", "Percent": "1.7"},
             {"FieldName": "Other", "Value": "876", "Percent": "18.1"},
         ],
-        "LastUpdated": datetime.now().isoformat(),
+        "LastUpdated": datetime.now().isoformat(),  # noqa: DTZ005 - mock data, local time is fine
         "Status": "OK",
     }
 
