@@ -2,6 +2,8 @@
 
 A Python-based ETL pipeline that ingests from three independent sources - ENTSO-E (European grid generation data), EirGrid (Irish grid, legacy), and Open-Meteo (weather, for correlating wind/solar conditions with renewable generation) - then validates, transforms, and loads it into a local database.
 
+See [docs/DIAGRAMS.md](docs/DIAGRAMS.md) for the architecture, data flow, database schema, and branching model diagrams.
+
 ## Project Structure
 
 ```
