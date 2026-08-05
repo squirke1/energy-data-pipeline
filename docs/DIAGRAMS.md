@@ -2,6 +2,31 @@
 
 Reference diagrams for `energy-data-pipeline`. These render natively on GitHub (no plugins needed) since they're standard Mermaid fenced code blocks.
 
+## System context (C4 level 1)
+
+The zoomed-out view before the detail: what's inside the system boundary versus what's external to it. One actor (a developer or a CI job, running the same CLI either way), three external data sources, one local sink.
+
+```mermaid
+C4Context
+    title System Context — energy-data-pipeline
+
+    Person(dev, "Developer / CI job", "Runs the pipeline via CLI, locally or in GitHub Actions, identically either way")
+
+    System(pipeline, "energy-data-pipeline", "Ingests, validates, transforms, and loads energy + weather data")
+
+    System_Ext(entsoe, "ENTSO-E Transparency Platform", "European grid generation data. Token auth, email-gated approval")
+    System_Ext(eirgrid, "EirGrid Smart Grid Dashboard", "Irish grid generation data. Legacy, undocumented, no auth")
+    System_Ext(meteo, "Open-Meteo", "Weather data (temperature, wind, solar radiation). Fully public, no auth")
+
+    SystemDb(db, "data/energy.db", "Local SQLite database - generation_fact, generation_summary, pipeline_runs")
+
+    Rel(dev, pipeline, "Runs", "CLI, --mock or live")
+    Rel(pipeline, entsoe, "Fetches generation data", "HTTPS + token")
+    Rel(pipeline, eirgrid, "Fetches generation data", "HTTPS")
+    Rel(pipeline, meteo, "Fetches weather data", "HTTPS")
+    Rel(pipeline, db, "Reads / writes", "sqlite3")
+```
+
 ## System architecture
 
 Three independently-authenticated sources feed the same shared validate → transform → load machinery, coordinated by `orchestrate.py`. Weather takes a lighter path since it isn't generation data — it doesn't have a `fuel_type`/`is_renewable` shape to validate or transform, so it goes straight to storage plus the shared run-log.
