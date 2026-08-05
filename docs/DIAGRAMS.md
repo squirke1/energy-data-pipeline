@@ -87,6 +87,45 @@ flowchart TB
     LOG --> DB[("data/energy.db")]
 ```
 
+## Run sequence (success and failure paths)
+
+The swimlane diagram shows *what path data takes*; this shows *who calls whom, in what order* - including what happens when validation fails. `run_entsoe_pipeline()` is shown as the representative case; `run_eirgrid_pipeline()` follows the identical shape.
+
+```mermaid
+sequenceDiagram
+    actor CLI as orchestrate.py __main__
+    participant Orch as run_entsoe_pipeline()
+    participant Ingest as ingest_entsoe.py
+    participant Val as validate.py
+    participant Trans as transform_energy.py
+    participant Load as load_db.py
+    participant DB as data/energy.db
+
+    CLI->>Orch: run_entsoe_pipeline(mock=True)
+    Orch->>Load: init_db()
+    Orch->>Ingest: fetch_generation() / generate_mock_data()
+    Ingest-->>Orch: raw_df
+    Orch->>Val: validate_generation_df(raw_df)
+    Val-->>Orch: ValidationResult
+
+    alt validation passed
+        Orch->>Trans: transform_entsoe_generation(raw_df)
+        Trans-->>Orch: long_df, summary_df
+        Orch->>Load: load_generation_fact(long_df)
+        Orch->>Load: load_generation_summary(summary_df)
+        Load->>DB: upsert rows
+        Orch->>Load: log_pipeline_run("entsoe", fact_rows, "success")
+        Load->>DB: insert pipeline_runs row
+        Orch-->>CLI: {"status": "success", ...}
+    else validation failed
+        Orch->>Orch: raise ValueError(validation.errors)
+        Orch->>Load: log_pipeline_run("entsoe", 0, "failed", str(e))
+        Load->>DB: insert pipeline_runs row
+        Orch--xCLI: exception propagates
+        CLI->>CLI: caught by top-level except,<br/>printed, other sources still run
+    end
+```
+
 ## Database schema
 
 SQLite, created and upserted by `load_db.py`. Fact and summary rows aren't linked by a foreign key — they're correlated by `(timestamp, country_code)`, which is also the natural join key for a future weather-vs-generation analysis (Stage 6).
@@ -122,6 +161,25 @@ erDiagram
     }
 
     generation_fact }o..o{ generation_summary : "same timestamp + country_code"
+```
+
+## CI/CD pipeline
+
+From `.github/workflows/ci.yml`. Every push and PR gets linted and tested across both Python versions; only branches actually headed to production get packaged.
+
+```mermaid
+flowchart TD
+    TRIGGER["push or pull_request<br/>main, develop, feature/**, release/**, hotfix/**"] --> M1
+
+    subgraph matrix["Lint and Test — matrix: Python 3.10, 3.11"]
+        direction LR
+        M1["Checkout"] --> M2["Set up Python"] --> M3["pip install -r requirements.txt<br/>pip install pytest ruff"] --> M4["ruff check src tests"] --> M5["pytest tests/ -v"]
+    end
+
+    M5 --> GATE{"branch is<br/>main / release/* / hotfix/*?"}
+    GATE -- yes --> PKG["Package artifact<br/>tar czf dist/energy-data-pipeline.tar.gz<br/>src requirements.txt"]
+    GATE -- no --> SKIP["Package job skipped"]
+    PKG --> UPLOAD["Upload artifact<br/>(GitHub Actions artifact store)"]
 ```
 
 ## Branching model (GitFlow)
