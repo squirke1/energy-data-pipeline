@@ -165,7 +165,7 @@ class TestLogPipelineRun:
         assert row == ("entsoe", 100, "success")
 
     def test_failure_run_recorded(self, tmp_db):
-        log_pipeline_run("eirgrid", 0, "failed", message="API timeout", db_path=tmp_db)
+        log_pipeline_run("carbon_intensity", 0, "failed", message="API timeout", db_path=tmp_db)
         with get_connection(tmp_db) as conn:
             row = conn.execute(
                 "SELECT status, message FROM pipeline_runs"

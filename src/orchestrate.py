@@ -4,12 +4,13 @@ import sys
 import pandas as pd
 
 from config import LOG_DATE_FORMAT, LOG_FORMAT, LOG_LEVEL
-from ingest_eirgrid import (
-    EirGridIngestionError,
-    fetch_eirgrid_data,
+from ingest_carbon_intensity import (
+    CarbonIntensityIngestionError,
+    fetch_generation_mix,
+    save_generation_mix_data,
 )
-from ingest_eirgrid import (
-    generate_mock_data as eirgrid_mock,
+from ingest_carbon_intensity import (
+    generate_mock_data as carbon_intensity_mock,
 )
 from ingest_entsoe import (
     EntsoeIngestionError,
@@ -28,8 +29,8 @@ from load_db import (
     load_generation_summary,
     log_pipeline_run,
 )
-from transform_energy import transform_eirgrid_generation, transform_entsoe_generation
-from validate import validate_eirgrid_response, validate_generation_df
+from transform_energy import transform_entsoe_generation
+from validate import validate_generation_df
 
 logging.basicConfig(level=LOG_LEVEL, format=LOG_FORMAT, datefmt=LOG_DATE_FORMAT)
 logger = logging.getLogger(__name__)
@@ -77,39 +78,6 @@ def run_entsoe_pipeline(
         raise
 
 
-def run_eirgrid_pipeline(mock: bool = False) -> dict:
-    logger.info(f"Starting EirGrid pipeline (mock={mock})")
-    init_db()
-
-    try:
-        raw_data = eirgrid_mock() if mock else fetch_eirgrid_data("generation")
-
-        validation = validate_eirgrid_response(raw_data)
-        if not validation.passed:
-            raise ValueError(f"Validation failed: {validation.errors}")
-
-        long_df, summary_df = transform_eirgrid_generation(raw_data)
-
-        fact_rows = load_generation_fact(long_df)
-        summary_rows = load_generation_summary(summary_df)
-
-        log_pipeline_run("eirgrid", fact_rows, "success")
-        result = {
-            "status": "success",
-            "source": "eirgrid",
-            "fact_rows": fact_rows,
-            "summary_rows": summary_rows,
-            "validation": validation.summary(),
-        }
-        logger.info(f"EirGrid pipeline complete: {result}")
-        return result
-
-    except (EirGridIngestionError, ValueError) as e:
-        log_pipeline_run("eirgrid", 0, "failed", str(e))
-        logger.error(f"EirGrid pipeline failed: {e}")
-        raise
-
-
 def run_weather_pipeline(hours_back: int = 24, mock: bool = False) -> dict:
     logger.info(f"Starting weather pipeline (mock={mock}, hours_back={hours_back})")
     init_db()
@@ -134,26 +102,54 @@ def run_weather_pipeline(hours_back: int = 24, mock: bool = False) -> dict:
         raise
 
 
+def run_carbon_intensity_pipeline(hours_back: int = 24, mock: bool = False) -> dict:
+    logger.info(f"Starting carbon intensity pipeline (mock={mock}, hours_back={hours_back})")
+    init_db()
+
+    try:
+        df = (
+            carbon_intensity_mock(hours=hours_back)
+            if mock
+            else fetch_generation_mix(hours_back)
+        )
+        filepath = save_generation_mix_data(df)
+
+        log_pipeline_run("carbon_intensity", len(df), "success")
+        result = {
+            "status": "success",
+            "source": "carbon_intensity",
+            "rows": len(df),
+            "filepath": str(filepath),
+        }
+        logger.info(f"Carbon intensity pipeline complete: {result}")
+        return result
+
+    except CarbonIntensityIngestionError as e:
+        log_pipeline_run("carbon_intensity", 0, "failed", str(e))
+        logger.error(f"Carbon intensity pipeline failed: {e}")
+        raise
+
+
 if __name__ == "__main__":
     use_mock = "--mock" in sys.argv
     source = "all"
     for arg in sys.argv[1:]:
-        if arg in ("entsoe", "eirgrid", "weather", "both", "all"):
+        if arg in ("entsoe", "carbon_intensity", "weather", "all"):
             source = arg
 
-    if source in ("entsoe", "both", "all"):
+    if source in ("entsoe", "all"):
         try:
             result = run_entsoe_pipeline(mock=use_mock)
             print(f"ENTSOE: {result}")
         except Exception as e:  # noqa: BLE001 - top-level CLI catch-all so other sources can still run
             print(f"ENTSOE failed: {e}")
 
-    if source in ("eirgrid", "both", "all"):
+    if source in ("carbon_intensity", "all"):
         try:
-            result = run_eirgrid_pipeline(mock=use_mock)
-            print(f"EirGrid: {result}")
+            result = run_carbon_intensity_pipeline(mock=use_mock)
+            print(f"Carbon intensity: {result}")
         except Exception as e:  # noqa: BLE001 - top-level CLI catch-all
-            print(f"EirGrid failed: {e}")
+            print(f"Carbon intensity failed: {e}")
 
     if source in ("weather", "all"):
         try:
