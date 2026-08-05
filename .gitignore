@@ -54,4 +54,4 @@ htmlcov/
 .env
 
 # Local notes
-BLOG.md
+docs/BLOG.md
