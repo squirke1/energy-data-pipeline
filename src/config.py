@@ -20,14 +20,15 @@ WEATHER_LATITUDE = 53.3498  # Dublin
 WEATHER_LONGITUDE = -6.2603
 WEATHER_LOCATION_NAME = "Dublin"
 
-# Legacy EirGrid endpoints (deprecated, kept for backward compatibility)
-EIRGRID_BASE_URL = "https://www.smartgriddashboard.com/DashboardService.svc"
-EIRGRID_ENDPOINTS = {
-    "generation": f"{EIRGRID_BASE_URL}/data",
-    "co2": f"{EIRGRID_BASE_URL}/co2",
-    "frequency": f"{EIRGRID_BASE_URL}/frequency",
-    "demand": f"{EIRGRID_BASE_URL}/demand",
-}
+# UK Carbon Intensity API (National Grid ESO, no key required) - real
+# generation mix + measured/forecast carbon intensity for Great Britain,
+# used as a second-country comparison against ENTSO-E's Irish data.
+# Replaces the old EirGrid integration: EirGrid's live dashboard endpoint
+# only returns a coarse 5-category snapshot (not the per-fuel-type time
+# series this pipeline needs), while this API is official, documented,
+# and returns exactly that shape.
+CARBON_INTENSITY_BASE_URL = "https://api.carbonintensity.org.uk"
+CARBON_INTENSITY_COUNTRY_CODE = "GB"
 
 LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO")
 LOG_FORMAT = "%(asctime)s - %(name)s - %(levelname)s - %(message)s"

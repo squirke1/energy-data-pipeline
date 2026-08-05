@@ -52,6 +52,14 @@ def fetch_generation(
         client = get_entsoe_client()
         df = client.query_generation(country_code=country_code, start=start, end=end)
         df.index = df.index.tz_convert("Europe/Dublin")  # type: ignore[attr-defined]
+
+        if isinstance(df.columns, pd.MultiIndex):
+            # Some fuel types (e.g. pumped storage) report both "Actual
+            # Aggregated" (generation) and "Actual Consumption" columns.
+            # Only generation output belongs in this pipeline's fuel_type
+            # rows, so keep the aggregated level and flatten it away.
+            df = df.xs("Actual Aggregated", axis=1, level=1)
+
         df["country_code"] = country_code
         logger.info(f"Fetched {len(df)} rows")
         return df

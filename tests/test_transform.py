@@ -11,7 +11,6 @@ from transform_energy import (
     compute_carbon_intensity,
     compute_generation_summary,
     melt_generation_df,
-    transform_eirgrid_generation,
     transform_entsoe_generation,
 )
 
@@ -161,43 +160,3 @@ class TestTransformEntsoeGeneration:
     def test_summary_row_count_matches_timestamps(self, sample_wide_df):
         _, summary_df = transform_entsoe_generation(sample_wide_df)
         assert len(summary_df) == 4
-
-
-class TestTransformEirgridGeneration:
-    @pytest.fixture
-    def eirgrid_data(self):
-        return {
-            "Rows": [
-                {"FieldName": "Wind", "Value": "1000"},
-                {"FieldName": "Gas", "Value": "2000"},
-                {"FieldName": "Solar", "Value": "100"},
-            ],
-            "Status": "OK",
-        }
-
-    def test_returns_two_dataframes(self, eirgrid_data):
-        long_df, summary_df = transform_eirgrid_generation(eirgrid_data)
-        assert isinstance(long_df, pd.DataFrame)
-        assert isinstance(summary_df, pd.DataFrame)
-
-    def test_long_df_row_count(self, eirgrid_data):
-        long_df, _ = transform_eirgrid_generation(eirgrid_data)
-        assert len(long_df) == 3
-
-    def test_summary_has_renewable_pct(self, eirgrid_data):
-        _, summary_df = transform_eirgrid_generation(eirgrid_data)
-        assert "renewable_pct" in summary_df.columns
-
-    def test_empty_rows_raises(self):
-        with pytest.raises(ValueError, match="No rows"):
-            transform_eirgrid_generation({"Rows": []})
-
-    def test_invalid_value_rows_skipped(self):
-        data = {
-            "Rows": [
-                {"FieldName": "Wind", "Value": "1000"},
-                {"FieldName": "Bad", "Value": "not_a_number"},
-            ]
-        }
-        long_df, _ = transform_eirgrid_generation(data)
-        assert len(long_df) == 1
