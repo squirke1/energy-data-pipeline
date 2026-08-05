@@ -13,6 +13,13 @@ PROCESSED_DATA_DIR.mkdir(parents=True, exist_ok=True)
 # Get API key from: https://transparency.entsoe.eu/content/static_content/Static%20content/web%20api/Guide.html
 ENTSOE_COUNTRY_CODE = "IE"  # Ireland
 
+# Open-Meteo weather API (no key required) - used to correlate wind/solar
+# conditions with renewable generation
+OPEN_METEO_BASE_URL = "https://api.open-meteo.com/v1/forecast"
+WEATHER_LATITUDE = 53.3498  # Dublin
+WEATHER_LONGITUDE = -6.2603
+WEATHER_LOCATION_NAME = "Dublin"
+
 # Legacy EirGrid endpoints (deprecated, kept for backward compatibility)
 EIRGRID_BASE_URL = "https://www.smartgriddashboard.com/DashboardService.svc"
 EIRGRID_ENDPOINTS = {

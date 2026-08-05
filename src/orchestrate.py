@@ -18,6 +18,10 @@ from ingest_entsoe import (
 from ingest_entsoe import (
     generate_mock_data as entsoe_mock,
 )
+from ingest_weather import WeatherIngestionError, fetch_weather, save_weather_data
+from ingest_weather import (
+    generate_mock_data as weather_mock,
+)
 from load_db import (
     init_db,
     load_generation_fact,
@@ -106,23 +110,54 @@ def run_eirgrid_pipeline(mock: bool = False) -> dict:
         raise
 
 
+def run_weather_pipeline(hours_back: int = 24, mock: bool = False) -> dict:
+    logger.info(f"Starting weather pipeline (mock={mock}, hours_back={hours_back})")
+    init_db()
+
+    try:
+        df = weather_mock(hours=hours_back) if mock else fetch_weather(hours_back)
+        filepath = save_weather_data(df)
+
+        log_pipeline_run("weather", len(df), "success")
+        result = {
+            "status": "success",
+            "source": "weather",
+            "rows": len(df),
+            "filepath": str(filepath),
+        }
+        logger.info(f"Weather pipeline complete: {result}")
+        return result
+
+    except WeatherIngestionError as e:
+        log_pipeline_run("weather", 0, "failed", str(e))
+        logger.error(f"Weather pipeline failed: {e}")
+        raise
+
+
 if __name__ == "__main__":
     use_mock = "--mock" in sys.argv
-    source = "both"
+    source = "all"
     for arg in sys.argv[1:]:
-        if arg in ("entsoe", "eirgrid", "both"):
+        if arg in ("entsoe", "eirgrid", "weather", "both", "all"):
             source = arg
 
-    if source in ("entsoe", "both"):
+    if source in ("entsoe", "both", "all"):
         try:
             result = run_entsoe_pipeline(mock=use_mock)
             print(f"ENTSOE: {result}")
-        except Exception as e:  # noqa: BLE001 - top-level CLI catch-all so eirgrid can still run
+        except Exception as e:  # noqa: BLE001 - top-level CLI catch-all so other sources can still run
             print(f"ENTSOE failed: {e}")
 
-    if source in ("eirgrid", "both"):
+    if source in ("eirgrid", "both", "all"):
         try:
             result = run_eirgrid_pipeline(mock=use_mock)
             print(f"EirGrid: {result}")
         except Exception as e:  # noqa: BLE001 - top-level CLI catch-all
             print(f"EirGrid failed: {e}")
+
+    if source in ("weather", "all"):
+        try:
+            result = run_weather_pipeline(mock=use_mock)
+            print(f"Weather: {result}")
+        except Exception as e:  # noqa: BLE001 - top-level CLI catch-all
+            print(f"Weather failed: {e}")
