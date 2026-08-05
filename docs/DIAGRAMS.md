@@ -52,21 +52,39 @@ flowchart TD
     classDef orch fill:#5b8def,color:#fff,stroke:#3a6bc7
 ```
 
-## Data flow: generation path vs. weather path
+## Data flow (swimlanes by source)
 
-Two shapes of "done" for a source: generation data earns its way into fact/summary tables through validation and transformation; weather is saved and logged without being forced into a schema that doesn't fit it.
+Each source is its own lane through `orchestrate.py`. ENTSO-E and EirGrid both earn their way into `generation_fact`/`generation_summary` through the same validate → transform → load sequence and can fail at the validate step; weather has no generation shape to validate or transform against, so its lane is shorter by design, not by omission. All three converge on the same `log_pipeline_run()` call, so every run - success or failure, any source - lands in one queryable place.
 
 ```mermaid
-flowchart LR
-    A["Fetch raw data<br/>(live or --mock)"] --> B{"Generation<br/>data?"}
-    B -- "yes<br/>(ENTSO-E, EirGrid)" --> C["Validate<br/>missing intervals, out-of-range<br/>values, stale timestamps"]
-    C -- "failed" --> F["raise ValueError<br/>log_pipeline_run(status='failed')"]
-    C -- "passed" --> D["Transform<br/>wide → long, flag renewable,<br/>compute carbon intensity"]
-    D --> E["Load<br/>upsert generation_fact +<br/>generation_summary"]
-    E --> G["log_pipeline_run(status='success')"]
+flowchart TB
+    subgraph L1["ENTSO-E lane"]
+        direction LR
+        A1["Fetch<br/>(live or --mock)"] --> A2{"Validate<br/>validate_generation_df()"}
+        A2 -- passed --> A3["Transform<br/>melt, flag renewable,<br/>carbon intensity"]
+        A3 --> A4["Load<br/>generation_fact +<br/>generation_summary"]
+        A2 -- failed --> A5["raise ValueError"]
+    end
 
-    B -- "no<br/>(weather)" --> H["Save raw CSV/JSON<br/>to data/raw/"]
-    H --> G
+    subgraph L2["EirGrid lane"]
+        direction LR
+        B1["Fetch<br/>(live or --mock)"] --> B2{"Validate<br/>validate_eirgrid_response()"}
+        B2 -- passed --> B3["Transform<br/>melt, flag renewable,<br/>carbon intensity"]
+        B3 --> B4["Load<br/>generation_fact +<br/>generation_summary"]
+        B2 -- failed --> B5["raise ValueError"]
+    end
+
+    subgraph L3["Weather lane"]
+        direction LR
+        C1["Fetch<br/>(live or --mock)"] --> C2["Save raw CSV/JSON<br/>to data/raw/"]
+    end
+
+    A4 --> LOG["log_pipeline_run(source, status)"]
+    A5 --> LOG
+    B4 --> LOG
+    B5 --> LOG
+    C2 --> LOG
+    LOG --> DB[("data/energy.db")]
 ```
 
 ## Database schema
