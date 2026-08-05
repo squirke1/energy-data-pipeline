@@ -66,6 +66,33 @@ class TestFetchGeneration:
         with pytest.raises(EntsoeIngestionError):
             fetch_generation(pd.Timestamp.now(tz="UTC"), pd.Timestamp.now(tz="UTC"))
 
+    @patch("ingest_entsoe.get_entsoe_client")
+    def test_multiindex_columns_flattened(self, mock_get_client):
+        # Real ENTSO-E responses use MultiIndex columns when a fuel type
+        # reports both generation and consumption (e.g. pumped storage) -
+        # mock data never exercised this shape, which let a live-only bug
+        # through validate.py's plain-string "country_code" check.
+        index = pd.date_range("2026-01-01", periods=2, freq="15min", tz="UTC")
+        columns = pd.MultiIndex.from_tuples(
+            [
+                ("Fossil Gas", "Actual Aggregated"),
+                ("Hydro Pumped Storage", "Actual Aggregated"),
+                ("Hydro Pumped Storage", "Actual Consumption"),
+            ]
+        )
+        multiindex_df = pd.DataFrame([[100, 50, 10], [110, 55, 12]], index=index, columns=columns)
+
+        mock_client = Mock()
+        mock_client.query_generation.return_value = multiindex_df
+        mock_get_client.return_value = mock_client
+
+        result = fetch_generation(
+            pd.Timestamp("2026-01-01", tz="UTC"), pd.Timestamp("2026-01-02", tz="UTC")
+        )
+
+        assert not isinstance(result.columns, pd.MultiIndex)
+        assert list(result.columns) == ["Fossil Gas", "Hydro Pumped Storage", "country_code"]
+
 
 class TestSaveGenerationData:
     def test_save_csv(self, tmp_path, sample_df, monkeypatch):
