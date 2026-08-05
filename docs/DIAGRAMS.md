@@ -14,61 +14,60 @@ C4Context
 
     System(pipeline, "energy-data-pipeline", "Ingests, validates, transforms, and loads energy + weather data")
 
-    System_Ext(entsoe, "ENTSO-E Transparency Platform", "European grid generation data. Token auth, email-gated approval")
-    System_Ext(eirgrid, "EirGrid Smart Grid Dashboard", "Irish grid generation data. Legacy, undocumented, no auth")
+    System_Ext(entsoe, "ENTSO-E Transparency Platform", "Irish grid generation data. Token auth, email-gated approval")
+    System_Ext(carbon, "UK Carbon Intensity API", "GB generation mix + carbon intensity. Official (National Grid ESO), fully public, no auth")
     System_Ext(meteo, "Open-Meteo", "Weather data (temperature, wind, solar radiation). Fully public, no auth")
 
     SystemDb(db, "data/energy.db", "Local SQLite database - generation_fact, generation_summary, pipeline_runs")
 
     Rel(dev, pipeline, "Runs", "CLI, --mock or live")
     Rel(pipeline, entsoe, "Fetches generation data", "HTTPS + token")
-    Rel(pipeline, eirgrid, "Fetches generation data", "HTTPS")
+    Rel(pipeline, carbon, "Fetches generation mix", "HTTPS")
     Rel(pipeline, meteo, "Fetches weather data", "HTTPS")
     Rel(pipeline, db, "Reads / writes", "sqlite3")
 ```
 
 ## System architecture
 
-Three independently-authenticated sources feed the same shared validate → transform → load machinery, coordinated by `orchestrate.py`. Weather takes a lighter path since it isn't generation data — it doesn't have a `fuel_type`/`is_renewable` shape to validate or transform, so it goes straight to storage plus the shared run-log.
+Three independently-authenticated sources, coordinated by `orchestrate.py`. Only ENTSO-E has the `fuel_type`/`is_renewable` shape that `validate.py`/`transform_energy.py` are built around, so it's the only source that earns the full validate → transform → load path into `generation_fact`/`generation_summary`. The GB carbon-intensity source and weather both go straight to storage plus the shared run-log instead of being forced into a schema that doesn't fit their data.
 
 ```mermaid
 flowchart TD
     subgraph ext["External sources"]
-        ENTSOE["ENTSO-E Transparency Platform<br/><i>token auth, 30+ EU zones</i>"]
-        EIRGRID["EirGrid Smart Grid Dashboard<br/><i>no auth, legacy, IE only</i>"]
+        ENTSOE["ENTSO-E Transparency Platform<br/><i>token auth, Ireland</i>"]
+        CARBON["UK Carbon Intensity API<br/><i>no auth, Great Britain</i>"]
         METEO["Open-Meteo<br/><i>no auth, no signup</i>"]
     end
 
     subgraph ingest["Ingestion — src/ingest_*.py"]
         I_ENTSOE["ingest_entsoe.py"]
-        I_EIRGRID["ingest_eirgrid.py"]
+        I_CARBON["ingest_carbon_intensity.py"]
         I_WEATHER["ingest_weather.py"]
     end
 
     ENTSOE --> I_ENTSOE
-    EIRGRID --> I_EIRGRID
+    CARBON --> I_CARBON
     METEO --> I_WEATHER
 
     I_ENTSOE --> RAW[("data/raw/*.csv, *.json")]
-    I_EIRGRID --> RAW
+    I_CARBON --> RAW
     I_WEATHER --> RAW
 
     I_ENTSOE --> VALIDATE["validate.py<br/>validate_generation_df()"]
-    I_EIRGRID --> VALIDATE2["validate.py<br/>validate_eirgrid_response()"]
-
     VALIDATE --> TRANSFORM["transform_energy.py<br/>melt, flag renewables,<br/>compute carbon intensity"]
-    VALIDATE2 --> TRANSFORM
-
     TRANSFORM --> LOAD["load_db.py<br/>load_generation_fact()<br/>load_generation_summary()"]
-    I_WEATHER --> SAVE["save_weather_data()"]
+
+    I_CARBON --> SAVE_C["save_generation_mix_data()"]
+    I_WEATHER --> SAVE_W["save_weather_data()"]
 
     LOAD --> DB[("data/energy.db — SQLite")]
-    SAVE --> RUNLOG["log_pipeline_run()"]
+    SAVE_C --> RUNLOG["log_pipeline_run()"]
+    SAVE_W --> RUNLOG
     LOAD --> RUNLOG
     RUNLOG --> DB
 
     ORCH["orchestrate.py"]:::orch -.controls.-> I_ENTSOE
-    ORCH -.controls.-> I_EIRGRID
+    ORCH -.controls.-> I_CARBON
     ORCH -.controls.-> I_WEATHER
     ORCH -.controls.-> VALIDATE
     ORCH -.controls.-> TRANSFORM
@@ -79,7 +78,7 @@ flowchart TD
 
 ## Data flow (swimlanes by source)
 
-Each source is its own lane through `orchestrate.py`. ENTSO-E and EirGrid both earn their way into `generation_fact`/`generation_summary` through the same validate → transform → load sequence and can fail at the validate step; weather has no generation shape to validate or transform against, so its lane is shorter by design, not by omission. All three converge on the same `log_pipeline_run()` call, so every run - success or failure, any source - lands in one queryable place.
+Each source is its own lane through `orchestrate.py`. ENTSO-E earns its way into `generation_fact`/`generation_summary` through validate → transform → load, and can fail at the validate step; the GB carbon-intensity source and weather have no `fuel_type`/MW generation shape to validate or transform against, so their lanes are shorter by design, not by omission. All three converge on the same `log_pipeline_run()` call, so every run - success or failure, any source - lands in one queryable place.
 
 ```mermaid
 flowchart TB
@@ -91,12 +90,9 @@ flowchart TB
         A2 -- failed --> A5["raise ValueError"]
     end
 
-    subgraph L2["EirGrid lane"]
+    subgraph L2["Carbon intensity lane (GB)"]
         direction LR
-        B1["Fetch<br/>(live or --mock)"] --> B2{"Validate<br/>validate_eirgrid_response()"}
-        B2 -- passed --> B3["Transform<br/>melt, flag renewable,<br/>carbon intensity"]
-        B3 --> B4["Load<br/>generation_fact +<br/>generation_summary"]
-        B2 -- failed --> B5["raise ValueError"]
+        B1["Fetch<br/>(live or --mock)"] --> B2["Save raw CSV/JSON<br/>to data/raw/"]
     end
 
     subgraph L3["Weather lane"]
@@ -106,15 +102,14 @@ flowchart TB
 
     A4 --> LOG["log_pipeline_run(source, status)"]
     A5 --> LOG
-    B4 --> LOG
-    B5 --> LOG
+    B2 --> LOG
     C2 --> LOG
     LOG --> DB[("data/energy.db")]
 ```
 
 ## Run sequence (success and failure paths)
 
-The swimlane diagram shows *what path data takes*; this shows *who calls whom, in what order* - including what happens when validation fails. `run_entsoe_pipeline()` is shown as the representative case; `run_eirgrid_pipeline()` follows the identical shape.
+The swimlane diagram shows *what path data takes*; this shows *who calls whom, in what order* - including what happens when validation fails. `run_entsoe_pipeline()` is the only source with a validate/transform branch to show; `run_carbon_intensity_pipeline()` and `run_weather_pipeline()` are a shorter fetch → save → log sequence (see the swimlane diagram above).
 
 ```mermaid
 sequenceDiagram

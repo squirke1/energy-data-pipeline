@@ -41,6 +41,8 @@ data/processed/*
 !data/raw/.gitkeep
 !data/processed/.gitkeep
 data/*.db
+data/*.db-shm
+data/*.db-wal
 
 # Testing
 .pytest_cache/

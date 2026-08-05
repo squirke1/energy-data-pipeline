@@ -1,6 +1,6 @@
 # Energy Data Pipeline
 
-A Python-based ETL pipeline that ingests from three independent sources - ENTSO-E (European grid generation data), EirGrid (Irish grid, legacy), and Open-Meteo (weather, for correlating wind/solar conditions with renewable generation) - then validates, transforms, and loads it into a local database.
+A Python-based ETL pipeline that ingests from three independent sources - ENTSO-E (European grid generation data), the UK Carbon Intensity API (Great Britain's generation mix and carbon intensity, for cross-country comparison), and Open-Meteo (weather, for correlating wind/solar conditions with renewable generation) - then validates, transforms, and loads it into a local database.
 
 See [docs/DIAGRAMS.md](docs/DIAGRAMS.md) for the architecture, data flow, database schema, and branching model diagrams.
 
@@ -9,14 +9,14 @@ See [docs/DIAGRAMS.md](docs/DIAGRAMS.md) for the architecture, data flow, databa
 ```
 energy-data-pipeline/
 ├── src/
-│   ├── config.py              # Configuration settings
-│   ├── ingest_entsoe.py       # Data ingestion from ENTSO-E API (primary)
-│   ├── ingest_eirgrid.py      # Data ingestion from EirGrid (legacy)
-│   ├── ingest_weather.py      # Weather ingestion from Open-Meteo (no API key)
-│   ├── transform_energy.py    # Data transformation logic
-│   ├── validate.py            # Data validation
-│   ├── load_db.py             # Database loading
-│   └── orchestrate.py         # Pipeline orchestration
+│   ├── config.py                    # Configuration settings
+│   ├── ingest_entsoe.py             # Data ingestion from ENTSO-E API (primary)
+│   ├── ingest_carbon_intensity.py   # GB generation mix + carbon intensity (no API key)
+│   ├── ingest_weather.py            # Weather ingestion from Open-Meteo (no API key)
+│   ├── transform_energy.py          # Data transformation logic
+│   ├── validate.py                  # Data validation
+│   ├── load_db.py                   # Database loading
+│   └── orchestrate.py               # Pipeline orchestration
 ├── data/
 │   ├── raw/                   # Raw ingested data
 │   └── processed/             # Transformed data
@@ -28,7 +28,8 @@ energy-data-pipeline/
 ## Features
 
 ### ✅ Stage 1: Data Ingestion
-- Fetches generation data from ENTSO-E Transparency Platform (primary) and EirGrid (legacy)
+- Fetches generation data from ENTSO-E Transparency Platform (Ireland, token auth)
+- Fetches generation mix + carbon intensity from the UK Carbon Intensity API (Great Britain, free, no API key)
 - Fetches weather data (temperature, wind speed, solar radiation) from Open-Meteo - free, no API key required
 - Saves raw data as CSV or JSON in `/data/raw`
 - Comprehensive error handling and logging
@@ -82,8 +83,9 @@ python src/ingest_entsoe.py --mock
 export ENTSOE_API_KEY="your_api_key_here"
 python src/ingest_entsoe.py
 
-# EirGrid (legacy, needs no key)
-python src/ingest_eirgrid.py --mock
+# UK Carbon Intensity API (needs no key, live or mock)
+python src/ingest_carbon_intensity.py --mock
+python src/ingest_carbon_intensity.py
 
 # Weather via Open-Meteo (needs no key, live or mock)
 python src/ingest_weather.py --mock
@@ -100,7 +102,7 @@ python src/orchestrate.py --mock
 
 # A single source
 python src/orchestrate.py --mock entsoe
-python src/orchestrate.py --mock eirgrid
+python src/orchestrate.py --mock carbon_intensity
 python src/orchestrate.py --mock weather
 ```
 
@@ -126,7 +128,7 @@ pytest tests/ -v
 
 Run specific test file:
 ```bash
-pytest tests/test_ingest.py -v
+pytest tests/test_ingest_entsoe.py -v
 ```
 
 ## CI/CD
