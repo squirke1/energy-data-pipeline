@@ -10,14 +10,15 @@ See [docs/DIAGRAMS.md](docs/DIAGRAMS.md) for the architecture, data flow, databa
 energy-data-pipeline/
 ├── src/
 │   ├── config.py                    # Configuration settings
-│   ├── ingest_entsoe.py             # Data ingestion from ENTSO-E API (primary)
-│   ├── ingest_carbon_intensity.py   # GB generation mix + carbon intensity (no API key)
-│   ├── ingest_weather.py            # Weather ingestion from Open-Meteo (no API key)
-│   ├── raw_store.py                 # MongoDB raw payload storage, shared by all sources
-│   ├── transform_energy.py          # Data transformation logic
-│   ├── validate.py                  # Data validation
-│   ├── load_db.py                   # Postgres loading (generation_fact/summary, pipeline_runs)
-│   └── orchestrate.py               # Pipeline orchestration
+│   ├── base_source.py               # BaseSource ABC + shared IngestionError
+│   ├── ingest_entsoe.py             # EntsoeSource(BaseSource) - ENTSO-E API (primary)
+│   ├── ingest_carbon_intensity.py   # CarbonIntensitySource(BaseSource) - GB mix + carbon intensity
+│   ├── ingest_weather.py            # WeatherSource(BaseSource) - Open-Meteo
+│   ├── raw_store.py                 # RawStore - MongoDB raw payload storage, shared by all sources
+│   ├── transform_energy.py          # GenerationTransformer
+│   ├── validate.py                  # GenerationValidator
+│   ├── load_db.py                   # PostgresDatabase - generation_fact/summary, pipeline_runs
+│   └── orchestrate.py               # Orchestrator - ties every source together
 ├── data/
 │   └── processed/             # Transformed output (reserved; not yet written to)
 ├── tests/                     # Unit tests
@@ -37,10 +38,14 @@ energy-data-pipeline/
 - Mock data mode for every source, for testing without network access or API keys
 
 ### ✅ Stages 2-5: Validate, Transform, Load, Orchestrate
-- `validate.py` checks generation data for missing intervals, out-of-range values, and stale timestamps
-- `transform_energy.py` reshapes raw generation data into long/summary tables and flags renewable sources
-- `load_db.py` loads validated, transformed data into Postgres (`generation_fact`, `generation_summary`, `pipeline_runs`). Only ENTSO-E has the fuel-type/MW shape this needs - the GB carbon-intensity and weather sources go straight to MongoDB instead of being forced into a schema that doesn't fit them
-- `orchestrate.py` chains ingest → validate → transform → load for each source, runnable independently or together
+- `GenerationValidator` (`validate.py`) checks generation data for missing intervals, out-of-range values, and stale timestamps
+- `GenerationTransformer` (`transform_energy.py`) reshapes raw generation data into long/summary tables and flags renewable sources
+- `PostgresDatabase` (`load_db.py`) loads validated, transformed data into Postgres (`generation_fact`, `generation_summary`, `pipeline_runs`). Only ENTSO-E has the fuel-type/MW shape this needs - the GB carbon-intensity and weather sources go straight to MongoDB instead of being forced into a schema that doesn't fit them
+- `Orchestrator` (`orchestrate.py`) chains ingest → validate → transform → load for each source, runnable independently or together
+
+### Design
+
+Every ingestion source (`EntsoeSource`, `WeatherSource`, `CarbonIntensitySource`) subclasses `BaseSource`, which defines the shared `fetch()` / `generate_mock_data()` / `save()` / `ingest()` shape and a single `IngestionError` used by all three - so `Orchestrator` can handle any source polymorphically rather than needing per-source exception handling. Dependencies (`RawStore`, `PostgresDatabase`, `GenerationValidator`, `GenerationTransformer`) are constructor-injected rather than imported as module globals, which is what makes the class-based tests able to swap in mocks/fakes cleanly.
 
 ## Installation
 
@@ -116,7 +121,7 @@ python src/orchestrate.py --mock weather
 **Programmatic Usage:**
 
 ```python
-from src.ingest_entsoe import ingest_generation_data
+from src.ingest_entsoe import EntsoeSource
 import os
 
 # Set API key
@@ -124,7 +129,7 @@ os.environ["ENTSOE_API_KEY"] = "your_key_here"
 
 # Ingest last 24 hours of generation data - saves the raw payload to
 # MongoDB and returns its document id
-raw_id = ingest_generation_data(hours_back=24)
+raw_id = EntsoeSource(country_code="IE").ingest(hours_back=24)
 ```
 
 ## Testing

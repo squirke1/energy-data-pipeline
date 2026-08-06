@@ -1,159 +1,132 @@
 import logging
 import sys
 
-import pandas as pd
-
+from base_source import BaseSource, IngestionError
 from config import LOG_DATE_FORMAT, LOG_FORMAT, LOG_LEVEL
-from ingest_carbon_intensity import (
-    CarbonIntensityIngestionError,
-    fetch_generation_mix,
-    save_generation_mix_data,
-)
-from ingest_carbon_intensity import (
-    generate_mock_data as carbon_intensity_mock,
-)
-from ingest_entsoe import (
-    EntsoeIngestionError,
-    fetch_generation,
-)
-from ingest_entsoe import (
-    generate_mock_data as entsoe_mock,
-)
-from ingest_weather import WeatherIngestionError, fetch_weather, save_weather_data
-from ingest_weather import (
-    generate_mock_data as weather_mock,
-)
-from load_db import (
-    init_db,
-    load_generation_fact,
-    load_generation_summary,
-    log_pipeline_run,
-)
-from transform_energy import transform_entsoe_generation
-from validate import validate_generation_df
+from ingest_carbon_intensity import CarbonIntensitySource
+from ingest_entsoe import EntsoeSource
+from ingest_weather import WeatherSource
+from load_db import PostgresDatabase
+from transform_energy import GenerationTransformer
+from validate import GenerationValidator
 
 logging.basicConfig(level=LOG_LEVEL, format=LOG_FORMAT, datefmt=LOG_DATE_FORMAT)
 logger = logging.getLogger(__name__)
 
 
-def run_entsoe_pipeline(
-    hours_back: int = 24,
-    country_code: str = "IE",
-    mock: bool = False,
-) -> dict:
-    logger.info(f"Starting ENTSOE pipeline (mock={mock}, hours_back={hours_back})")
-    init_db()
+class Orchestrator:
+    def __init__(
+        self,
+        db: PostgresDatabase | None = None,
+        validator: GenerationValidator | None = None,
+        transformer: GenerationTransformer | None = None,
+    ):
+        self.db = db or PostgresDatabase()
+        self.validator = validator or GenerationValidator()
+        self.transformer = transformer or GenerationTransformer()
 
-    try:
-        if mock:
-            raw_df = entsoe_mock(hours=hours_back)
-        else:
-            end = pd.Timestamp.now(tz="Europe/Dublin")
-            start = end - pd.Timedelta(hours=hours_back)
-            raw_df = fetch_generation(start, end, country_code)
+    def run_entsoe(
+        self,
+        hours_back: int = 24,
+        country_code: str = "IE",
+        mock: bool = False,
+        source: EntsoeSource | None = None,
+    ) -> dict:
+        source = source or EntsoeSource(country_code=country_code)
+        logger.info(f"Starting ENTSOE pipeline (mock={mock}, hours_back={hours_back})")
+        self.db.init_db()
 
-        validation = validate_generation_df(raw_df)
-        if not validation.passed:
-            raise ValueError(f"Validation failed: {validation.errors}")
+        try:
+            raw_df = source.generate_mock_data(hours_back) if mock else source.fetch(hours_back)
 
-        long_df, summary_df = transform_entsoe_generation(raw_df)
+            validation = self.validator.validate(raw_df)
+            if not validation.passed:
+                raise ValueError(f"Validation failed: {validation.errors}")
 
-        fact_rows = load_generation_fact(long_df)
-        summary_rows = load_generation_summary(summary_df)
+            long_df, summary_df = self.transformer.transform_entsoe_generation(raw_df)
 
-        log_pipeline_run("entsoe", fact_rows, "success")
-        result = {
-            "status": "success",
-            "source": "entsoe",
-            "fact_rows": fact_rows,
-            "summary_rows": summary_rows,
-            "validation": validation.summary(),
-        }
-        logger.info(f"ENTSOE pipeline complete: {result}")
-        return result
+            fact_rows = self.db.load_generation_fact(long_df)
+            summary_rows = self.db.load_generation_summary(summary_df)
 
-    except (EntsoeIngestionError, ValueError) as e:
-        log_pipeline_run("entsoe", 0, "failed", str(e))
-        logger.error(f"ENTSOE pipeline failed: {e}")
-        raise
+            self.db.log_pipeline_run("entsoe", fact_rows, "success")
+            result = {
+                "status": "success",
+                "source": "entsoe",
+                "fact_rows": fact_rows,
+                "summary_rows": summary_rows,
+                "validation": validation.summary(),
+            }
+            logger.info(f"ENTSOE pipeline complete: {result}")
+            return result
 
+        except (IngestionError, ValueError) as e:
+            self.db.log_pipeline_run("entsoe", 0, "failed", str(e))
+            logger.error(f"ENTSOE pipeline failed: {e}")
+            raise
 
-def run_weather_pipeline(hours_back: int = 24, mock: bool = False) -> dict:
-    logger.info(f"Starting weather pipeline (mock={mock}, hours_back={hours_back})")
-    init_db()
-
-    try:
-        df = weather_mock(hours=hours_back) if mock else fetch_weather(hours_back)
-        raw_id = save_weather_data(df)
-
-        log_pipeline_run("weather", len(df), "success")
-        result = {
-            "status": "success",
-            "source": "weather",
-            "rows": len(df),
-            "raw_id": raw_id,
-        }
-        logger.info(f"Weather pipeline complete: {result}")
-        return result
-
-    except WeatherIngestionError as e:
-        log_pipeline_run("weather", 0, "failed", str(e))
-        logger.error(f"Weather pipeline failed: {e}")
-        raise
-
-
-def run_carbon_intensity_pipeline(hours_back: int = 24, mock: bool = False) -> dict:
-    logger.info(f"Starting carbon intensity pipeline (mock={mock}, hours_back={hours_back})")
-    init_db()
-
-    try:
-        df = (
-            carbon_intensity_mock(hours=hours_back)
-            if mock
-            else fetch_generation_mix(hours_back)
+    def _run_raw_only_pipeline(self, source: BaseSource, hours_back: int, mock: bool) -> dict:
+        """Shared shape for sources with no fuel_type/MW data to validate or
+        transform - fetch, save raw, log. Both current raw-only sources
+        (weather, carbon intensity) are otherwise identical here.
+        """
+        logger.info(
+            f"Starting {source.source_name} pipeline (mock={mock}, hours_back={hours_back})"
         )
-        raw_id = save_generation_mix_data(df)
+        self.db.init_db()
 
-        log_pipeline_run("carbon_intensity", len(df), "success")
-        result = {
-            "status": "success",
-            "source": "carbon_intensity",
-            "rows": len(df),
-            "raw_id": raw_id,
-        }
-        logger.info(f"Carbon intensity pipeline complete: {result}")
-        return result
+        try:
+            df = source.generate_mock_data(hours_back) if mock else source.fetch(hours_back)
+            raw_id = source.save(df)
 
-    except CarbonIntensityIngestionError as e:
-        log_pipeline_run("carbon_intensity", 0, "failed", str(e))
-        logger.error(f"Carbon intensity pipeline failed: {e}")
-        raise
+            self.db.log_pipeline_run(source.source_name, len(df), "success")
+            result = {
+                "status": "success",
+                "source": source.source_name,
+                "rows": len(df),
+                "raw_id": raw_id,
+            }
+            logger.info(f"{source.source_name} pipeline complete: {result}")
+            return result
+
+        except IngestionError as e:
+            self.db.log_pipeline_run(source.source_name, 0, "failed", str(e))
+            logger.error(f"{source.source_name} pipeline failed: {e}")
+            raise
+
+    def run_weather(
+        self, hours_back: int = 24, mock: bool = False, source: WeatherSource | None = None
+    ) -> dict:
+        return self._run_raw_only_pipeline(source or WeatherSource(), hours_back, mock)
+
+    def run_carbon_intensity(
+        self, hours_back: int = 24, mock: bool = False, source: CarbonIntensitySource | None = None
+    ) -> dict:
+        return self._run_raw_only_pipeline(source or CarbonIntensitySource(), hours_back, mock)
 
 
 if __name__ == "__main__":
     use_mock = "--mock" in sys.argv
-    source = "all"
+    selected_source = "all"
     for arg in sys.argv[1:]:
         if arg in ("entsoe", "carbon_intensity", "weather", "all"):
-            source = arg
+            selected_source = arg
 
-    if source in ("entsoe", "all"):
+    orchestrator = Orchestrator()
+
+    if selected_source in ("entsoe", "all"):
         try:
-            result = run_entsoe_pipeline(mock=use_mock)
-            print(f"ENTSOE: {result}")
+            print(f"ENTSOE: {orchestrator.run_entsoe(mock=use_mock)}")
         except Exception as e:  # noqa: BLE001 - top-level CLI catch-all so other sources can still run
             print(f"ENTSOE failed: {e}")
 
-    if source in ("carbon_intensity", "all"):
+    if selected_source in ("carbon_intensity", "all"):
         try:
-            result = run_carbon_intensity_pipeline(mock=use_mock)
-            print(f"Carbon intensity: {result}")
+            print(f"Carbon intensity: {orchestrator.run_carbon_intensity(mock=use_mock)}")
         except Exception as e:  # noqa: BLE001 - top-level CLI catch-all
             print(f"Carbon intensity failed: {e}")
 
-    if source in ("weather", "all"):
+    if selected_source in ("weather", "all"):
         try:
-            result = run_weather_pipeline(mock=use_mock)
-            print(f"Weather: {result}")
+            print(f"Weather: {orchestrator.run_weather(mock=use_mock)}")
         except Exception as e:  # noqa: BLE001 - top-level CLI catch-all
             print(f"Weather failed: {e}")
