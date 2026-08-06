@@ -1,6 +1,4 @@
 import logging
-from datetime import datetime
-from pathlib import Path
 
 import pandas as pd
 import requests
@@ -11,24 +9,24 @@ try:
         LOG_FORMAT,
         LOG_LEVEL,
         OPEN_METEO_BASE_URL,
-        RAW_DATA_DIR,
         REQUEST_TIMEOUT,
         WEATHER_LATITUDE,
         WEATHER_LOCATION_NAME,
         WEATHER_LONGITUDE,
     )
+    from src.raw_store import RawStoreError, save_raw
 except ImportError:
     from config import (
         LOG_DATE_FORMAT,
         LOG_FORMAT,
         LOG_LEVEL,
         OPEN_METEO_BASE_URL,
-        RAW_DATA_DIR,
         REQUEST_TIMEOUT,
         WEATHER_LATITUDE,
         WEATHER_LOCATION_NAME,
         WEATHER_LONGITUDE,
     )
+    from raw_store import RawStoreError, save_raw
 
 logging.basicConfig(level=LOG_LEVEL, format=LOG_FORMAT, datefmt=LOG_DATE_FORMAT)
 logger = logging.getLogger(__name__)
@@ -73,31 +71,21 @@ def fetch_weather(hours_back: int = 24) -> pd.DataFrame:
     return df
 
 
-def save_weather_data(df: pd.DataFrame, format: str = "csv") -> Path:
-    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")  # noqa: DTZ005 - local time is fine for a filename
-    filename = f"weather_{timestamp}.{format}"
-    filepath = RAW_DATA_DIR / filename
-
+def save_weather_data(df: pd.DataFrame) -> str:
     try:
-        if format == "csv":
-            df.to_csv(filepath)
-        elif format == "json":
-            df.to_json(filepath, orient="records", date_format="iso")
-        else:
-            raise WeatherIngestionError(f"Unsupported format: {format}")
-
-        logger.info(f"Saved to {filepath}")
-        return filepath
-    except Exception as e:
+        raw_id = save_raw("weather", df)
+        logger.info(f"Saved to raw store: {raw_id}")
+        return raw_id
+    except RawStoreError as e:
         logger.error(f"Save failed: {e}")
         raise WeatherIngestionError("Failed to save data") from e
 
 
-def ingest_weather_data(hours_back: int = 24, save_format: str = "csv") -> Path:
+def ingest_weather_data(hours_back: int = 24) -> str:
     try:
         df = fetch_weather(hours_back)
-        filepath = save_weather_data(df, save_format)
-        return filepath
+        raw_id = save_weather_data(df)
+        return raw_id
     except WeatherIngestionError:
         logger.error("Ingestion failed")
         raise
@@ -127,12 +115,12 @@ if __name__ == "__main__":
     if "--mock" in sys.argv:
         logger.info("Using mock data")
         df = generate_mock_data(hours=24)
-        filepath = save_weather_data(df, "csv")
-        print(f"Saved to: {filepath}")
+        raw_id = save_weather_data(df)
+        print(f"Saved to raw store: {raw_id}")
     else:
         try:
-            filepath = ingest_weather_data(hours_back=24, save_format="csv")
-            print(f"Saved to: {filepath}")
+            raw_id = ingest_weather_data(hours_back=24)
+            print(f"Saved to raw store: {raw_id}")
         except WeatherIngestionError as e:
             print(f"Failed: {e}")
             print("Tip: Open-Meteo needs no API key - if this failed, check network access")

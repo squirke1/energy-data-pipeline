@@ -1,26 +1,16 @@
 import logging
 import os
-from datetime import datetime
-from pathlib import Path
 
 import pandas as pd
 from dotenv import load_dotenv
 from entsoe.entsoe import EntsoePandasClient
 
 try:
-    from src.config import (
-        LOG_DATE_FORMAT,
-        LOG_FORMAT,
-        LOG_LEVEL,
-        RAW_DATA_DIR,
-    )
+    from src.config import LOG_DATE_FORMAT, LOG_FORMAT, LOG_LEVEL
+    from src.raw_store import RawStoreError, save_raw
 except ImportError:
-    from config import (
-        LOG_DATE_FORMAT,
-        LOG_FORMAT,
-        LOG_LEVEL,
-        RAW_DATA_DIR,
-    )
+    from config import LOG_DATE_FORMAT, LOG_FORMAT, LOG_LEVEL
+    from raw_store import RawStoreError, save_raw
 
 load_dotenv()
 
@@ -68,38 +58,24 @@ def fetch_generation(
         raise EntsoeIngestionError(str(e)) from e
 
 
-def save_generation_data(df: pd.DataFrame, format: str = "csv") -> Path:
-    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")  # noqa: DTZ005 - local time is fine for a filename
-    filename = f"entsoe_generation_{timestamp}.{format}"
-    filepath = RAW_DATA_DIR / filename
-    
+def save_generation_data(df: pd.DataFrame) -> str:
     try:
-        if format == "csv":
-            df.to_csv(filepath)
-        elif format == "json":
-            df.to_json(filepath, orient="records", date_format="iso")
-        else:
-            raise EntsoeIngestionError(f"Unsupported format: {format}")
-        
-        logger.info(f"Saved to {filepath}")
-        return filepath
-    except Exception as e:
+        raw_id = save_raw("entsoe", df)
+        logger.info(f"Saved to raw store: {raw_id}")
+        return raw_id
+    except RawStoreError as e:
         logger.error(f"Save failed: {e}")
         raise EntsoeIngestionError("Failed to save data") from e
 
 
-def ingest_generation_data(
-    hours_back: int = 24,
-    country_code: str = "IE",
-    save_format: str = "csv"
-) -> Path:
+def ingest_generation_data(hours_back: int = 24, country_code: str = "IE") -> str:
     end = pd.Timestamp.now(tz="Europe/Dublin")
     start = end - pd.Timedelta(hours=hours_back)
-    
+
     try:
         df = fetch_generation(start, end, country_code)
-        filepath = save_generation_data(df, save_format)
-        return filepath
+        raw_id = save_generation_data(df)
+        return raw_id
     except EntsoeIngestionError:
         logger.error("Ingestion failed")
         raise
@@ -129,12 +105,12 @@ if __name__ == "__main__":
     if "--mock" in sys.argv:
         logger.info("Using mock data")
         df = generate_mock_data(hours=24)
-        filepath = save_generation_data(df, "csv")
-        print(f"Saved to: {filepath}")
+        raw_id = save_generation_data(df)
+        print(f"Saved to raw store: {raw_id}")
     else:
         try:
-            filepath = ingest_generation_data(hours_back=24, save_format="csv")
-            print(f"Saved to: {filepath}")
+            raw_id = ingest_generation_data(hours_back=24)
+            print(f"Saved to raw store: {raw_id}")
         except EntsoeIngestionError as e:
             print(f"Failed: {e}")
             print("Tip: Set ENTSOE_API_KEY environment variable or use --mock flag")

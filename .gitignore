@@ -36,9 +36,8 @@ wheels/
 Thumbs.db
 
 # Data
-data/raw/*
+# (raw payloads now live in MongoDB, not data/raw/ - see src/raw_store.py)
 data/processed/*
-!data/raw/.gitkeep
 !data/processed/.gitkeep
 data/*.db
 data/*.db-shm

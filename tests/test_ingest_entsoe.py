@@ -15,6 +15,7 @@ from ingest_entsoe import (
     ingest_generation_data,
     save_generation_data,
 )
+from src.raw_store import RawStoreError
 
 
 @pytest.fixture
@@ -95,23 +96,18 @@ class TestFetchGeneration:
 
 
 class TestSaveGenerationData:
-    def test_save_csv(self, tmp_path, sample_df, monkeypatch):
-        monkeypatch.setattr("ingest_entsoe.RAW_DATA_DIR", tmp_path)
-        filepath = save_generation_data(sample_df, format="csv")
-        assert filepath.exists()
-        assert filepath.name.startswith("entsoe_generation_")
-        assert filepath.suffix == ".csv"
+    @patch("ingest_entsoe.save_raw")
+    def test_saves_to_raw_store(self, mock_save_raw, sample_df):
+        mock_save_raw.return_value = "abc123"
+        raw_id = save_generation_data(sample_df)
+        mock_save_raw.assert_called_once_with("entsoe", sample_df)
+        assert raw_id == "abc123"
 
-    def test_save_json(self, tmp_path, sample_df, monkeypatch):
-        monkeypatch.setattr("ingest_entsoe.RAW_DATA_DIR", tmp_path)
-        filepath = save_generation_data(sample_df, format="json")
-        assert filepath.exists()
-        assert filepath.suffix == ".json"
-
-    def test_invalid_format(self, tmp_path, sample_df, monkeypatch):
-        monkeypatch.setattr("ingest_entsoe.RAW_DATA_DIR", tmp_path)
+    @patch("ingest_entsoe.save_raw")
+    def test_raw_store_error_wrapped(self, mock_save_raw, sample_df):
+        mock_save_raw.side_effect = RawStoreError("connection refused")
         with pytest.raises(EntsoeIngestionError, match="Failed to save data"):
-            save_generation_data(sample_df, format="xml")
+            save_generation_data(sample_df)
 
 
 class TestIngestGenerationData:
@@ -119,11 +115,11 @@ class TestIngestGenerationData:
     @patch("ingest_entsoe.fetch_generation")
     def test_successful_ingestion(self, mock_fetch, mock_save, sample_df):
         mock_fetch.return_value = sample_df
-        mock_save.return_value = Path("/data/raw/entsoe_generation_test.csv")
+        mock_save.return_value = "abc123"
         result = ingest_generation_data(hours_back=24, country_code="IE")
         mock_fetch.assert_called_once()
-        mock_save.assert_called_once_with(sample_df, "csv")
-        assert isinstance(result, Path)
+        mock_save.assert_called_once_with(sample_df)
+        assert result == "abc123"
 
     @patch("ingest_entsoe.fetch_generation")
     def test_ingestion_failure_propagates(self, mock_fetch):
