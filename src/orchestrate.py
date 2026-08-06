@@ -84,14 +84,14 @@ def run_weather_pipeline(hours_back: int = 24, mock: bool = False) -> dict:
 
     try:
         df = weather_mock(hours=hours_back) if mock else fetch_weather(hours_back)
-        filepath = save_weather_data(df)
+        raw_id = save_weather_data(df)
 
         log_pipeline_run("weather", len(df), "success")
         result = {
             "status": "success",
             "source": "weather",
             "rows": len(df),
-            "filepath": str(filepath),
+            "raw_id": raw_id,
         }
         logger.info(f"Weather pipeline complete: {result}")
         return result
@@ -112,14 +112,14 @@ def run_carbon_intensity_pipeline(hours_back: int = 24, mock: bool = False) -> d
             if mock
             else fetch_generation_mix(hours_back)
         )
-        filepath = save_generation_mix_data(df)
+        raw_id = save_generation_mix_data(df)
 
         log_pipeline_run("carbon_intensity", len(df), "success")
         result = {
             "status": "success",
             "source": "carbon_intensity",
             "rows": len(df),
-            "filepath": str(filepath),
+            "raw_id": raw_id,
         }
         logger.info(f"Carbon intensity pipeline complete: {result}")
         return result

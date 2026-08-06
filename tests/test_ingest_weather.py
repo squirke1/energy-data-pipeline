@@ -13,6 +13,7 @@ from ingest_weather import (
     ingest_weather_data,
     save_weather_data,
 )
+from src.raw_store import RawStoreError
 
 
 @pytest.fixture
@@ -74,26 +75,20 @@ class TestFetchWeather:
 
 
 class TestSaveWeatherData:
-    def test_save_csv(self, tmp_path, mock_response, monkeypatch):
-        monkeypatch.setattr("ingest_weather.RAW_DATA_DIR", tmp_path)
+    @patch("ingest_weather.save_raw")
+    def test_saves_to_raw_store(self, mock_save_raw):
+        mock_save_raw.return_value = "abc123"
         df = generate_mock_data(hours=4)
-        filepath = save_weather_data(df, format="csv")
-        assert filepath.exists()
-        assert filepath.name.startswith("weather_")
-        assert filepath.suffix == ".csv"
+        raw_id = save_weather_data(df)
+        mock_save_raw.assert_called_once_with("weather", df)
+        assert raw_id == "abc123"
 
-    def test_save_json(self, tmp_path, monkeypatch):
-        monkeypatch.setattr("ingest_weather.RAW_DATA_DIR", tmp_path)
-        df = generate_mock_data(hours=4)
-        filepath = save_weather_data(df, format="json")
-        assert filepath.exists()
-        assert filepath.suffix == ".json"
-
-    def test_invalid_format(self, tmp_path, monkeypatch):
-        monkeypatch.setattr("ingest_weather.RAW_DATA_DIR", tmp_path)
+    @patch("ingest_weather.save_raw")
+    def test_raw_store_error_wrapped(self, mock_save_raw):
+        mock_save_raw.side_effect = RawStoreError("connection refused")
         df = generate_mock_data(hours=4)
         with pytest.raises(WeatherIngestionError, match="Failed to save data"):
-            save_weather_data(df, format="xml")
+            save_weather_data(df)
 
 
 class TestIngestWeatherData:
@@ -101,11 +96,11 @@ class TestIngestWeatherData:
     @patch("ingest_weather.fetch_weather")
     def test_successful_ingestion(self, mock_fetch, mock_save):
         mock_fetch.return_value = generate_mock_data(hours=4)
-        mock_save.return_value = Path("/data/raw/weather_test.csv")
+        mock_save.return_value = "abc123"
         result = ingest_weather_data(hours_back=24)
         mock_fetch.assert_called_once_with(24)
         mock_save.assert_called_once()
-        assert isinstance(result, Path)
+        assert result == "abc123"
 
     @patch("ingest_weather.fetch_weather")
     def test_ingestion_failure_propagates(self, mock_fetch):

@@ -24,6 +24,48 @@ jobs:
       fail-fast: false
       matrix:
         python-version: ["3.10", "3.11"]
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: pipeline
+          POSTGRES_PASSWORD: pipeline
+          POSTGRES_DB: energy_pipeline
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U pipeline"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+      mongo:
+        image: mongo:7
+        env:
+          MONGO_INITDB_ROOT_USERNAME: pipeline
+          MONGO_INITDB_ROOT_PASSWORD: pipeline
+          MONGO_INITDB_DATABASE: energy_pipeline
+        ports:
+          - 27017:27017
+        options: >-
+          --health-cmd "echo 'db.runCommand(\"ping\").ok' | mongosh localhost:27017/test --quiet"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      # GitHub-hosted runners are fresh/ephemeral, so unlike local dev
+      # (docker-compose.yml uses 5433/27018 to dodge a native Postgres/
+      # Mongo already on the default ports) these service containers can
+      # just use the standard 5432/27017
+      POSTGRES_HOST: localhost
+      POSTGRES_PORT: 5432
+      POSTGRES_DB: energy_pipeline
+      POSTGRES_USER: pipeline
+      POSTGRES_PASSWORD: pipeline
+      MONGO_HOST: localhost
+      MONGO_PORT: 27017
+      MONGO_DB: energy_pipeline
+      MONGO_USER: pipeline
+      MONGO_PASSWORD: pipeline
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
