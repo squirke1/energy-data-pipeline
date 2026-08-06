@@ -7,14 +7,8 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 
-from ingest_entsoe import (
-    EntsoeIngestionError,
-    fetch_generation,
-    generate_mock_data,
-    get_entsoe_client,
-    ingest_generation_data,
-    save_generation_data,
-)
+from ingest_entsoe import EntsoeSource
+from src.base_source import IngestionError
 from src.raw_store import RawStoreError
 
 
@@ -27,47 +21,44 @@ def sample_df():
     )
 
 
-class TestGetEntsoeClient:
+class TestGetClient:
     def test_missing_api_key(self, monkeypatch):
         monkeypatch.delenv("ENTSOE_API_KEY", raising=False)
-        with pytest.raises(EntsoeIngestionError, match="ENTSOE_API_KEY not set"):
-            get_entsoe_client()
+        with pytest.raises(IngestionError, match="ENTSOE_API_KEY not set"):
+            EntsoeSource().get_client()
 
     @patch("ingest_entsoe.EntsoePandasClient")
     def test_success(self, mock_client_cls, monkeypatch):
         monkeypatch.setenv("ENTSOE_API_KEY", "fake_key")
         mock_instance = Mock()
         mock_client_cls.return_value = mock_instance
-        client = get_entsoe_client()
+        client = EntsoeSource().get_client()
         mock_client_cls.assert_called_once_with(api_key="fake_key")
         assert client is mock_instance
 
 
-class TestFetchGeneration:
-    @patch("ingest_entsoe.get_entsoe_client")
+class TestFetch:
+    @patch("ingest_entsoe.EntsoeSource.get_client")
     def test_successful_fetch(self, mock_get_client, sample_df):
         mock_client = Mock()
         mock_client.query_generation.return_value = sample_df
         mock_get_client.return_value = mock_client
 
-        start = pd.Timestamp("2026-01-01", tz="UTC")
-        end = pd.Timestamp("2026-01-02", tz="UTC")
-        result = fetch_generation(start, end, country_code="IE")
+        result = EntsoeSource(country_code="IE").fetch(hours_back=24)
 
-        mock_client.query_generation.assert_called_once_with(
-            country_code="IE", start=start, end=end
-        )
+        _, kwargs = mock_client.query_generation.call_args
+        assert kwargs["country_code"] == "IE"
         assert "country_code" in result.columns
         assert (result["country_code"] == "IE").all()
         assert str(result.index.tz) == "Europe/Dublin"
 
-    @patch("ingest_entsoe.get_entsoe_client")
+    @patch("ingest_entsoe.EntsoeSource.get_client")
     def test_fetch_failure_wrapped(self, mock_get_client):
-        mock_get_client.side_effect = EntsoeIngestionError("no key")
-        with pytest.raises(EntsoeIngestionError):
-            fetch_generation(pd.Timestamp.now(tz="UTC"), pd.Timestamp.now(tz="UTC"))
+        mock_get_client.side_effect = IngestionError("no key")
+        with pytest.raises(IngestionError):
+            EntsoeSource().fetch()
 
-    @patch("ingest_entsoe.get_entsoe_client")
+    @patch("ingest_entsoe.EntsoeSource.get_client")
     def test_multiindex_columns_flattened(self, mock_get_client):
         # Real ENTSO-E responses use MultiIndex columns when a fuel type
         # reports both generation and consumption (e.g. pumped storage) -
@@ -87,57 +78,61 @@ class TestFetchGeneration:
         mock_client.query_generation.return_value = multiindex_df
         mock_get_client.return_value = mock_client
 
-        result = fetch_generation(
-            pd.Timestamp("2026-01-01", tz="UTC"), pd.Timestamp("2026-01-02", tz="UTC")
-        )
+        result = EntsoeSource().fetch()
 
         assert not isinstance(result.columns, pd.MultiIndex)
         assert list(result.columns) == ["Fossil Gas", "Hydro Pumped Storage", "country_code"]
 
 
-class TestSaveGenerationData:
-    @patch("ingest_entsoe.save_raw")
-    def test_saves_to_raw_store(self, mock_save_raw, sample_df):
-        mock_save_raw.return_value = "abc123"
-        raw_id = save_generation_data(sample_df)
-        mock_save_raw.assert_called_once_with("entsoe", sample_df)
+class TestSave:
+    def test_saves_to_raw_store(self, sample_df):
+        mock_raw_store = Mock()
+        mock_raw_store.save_raw.return_value = "abc123"
+        source = EntsoeSource(raw_store=mock_raw_store)
+
+        raw_id = source.save(sample_df)
+
+        mock_raw_store.save_raw.assert_called_once_with("entsoe", sample_df)
         assert raw_id == "abc123"
 
-    @patch("ingest_entsoe.save_raw")
-    def test_raw_store_error_wrapped(self, mock_save_raw, sample_df):
-        mock_save_raw.side_effect = RawStoreError("connection refused")
-        with pytest.raises(EntsoeIngestionError, match="Failed to save data"):
-            save_generation_data(sample_df)
+    def test_raw_store_error_wrapped(self, sample_df):
+        mock_raw_store = Mock()
+        mock_raw_store.save_raw.side_effect = RawStoreError("connection refused")
+        source = EntsoeSource(raw_store=mock_raw_store)
+
+        with pytest.raises(IngestionError, match="Failed to save data"):
+            source.save(sample_df)
 
 
-class TestIngestGenerationData:
-    @patch("ingest_entsoe.save_generation_data")
-    @patch("ingest_entsoe.fetch_generation")
-    def test_successful_ingestion(self, mock_fetch, mock_save, sample_df):
-        mock_fetch.return_value = sample_df
-        mock_save.return_value = "abc123"
-        result = ingest_generation_data(hours_back=24, country_code="IE")
-        mock_fetch.assert_called_once()
-        mock_save.assert_called_once_with(sample_df)
+class TestIngest:
+    def test_successful_ingestion(self, sample_df):
+        source = EntsoeSource()
+        source.fetch = Mock(return_value=sample_df)
+        source.save = Mock(return_value="abc123")
+
+        result = source.ingest(hours_back=24)
+
+        source.fetch.assert_called_once_with(24)
+        source.save.assert_called_once_with(sample_df)
         assert result == "abc123"
 
-    @patch("ingest_entsoe.fetch_generation")
-    def test_ingestion_failure_propagates(self, mock_fetch):
-        mock_fetch.side_effect = EntsoeIngestionError("API down")
-        with pytest.raises(EntsoeIngestionError):
-            ingest_generation_data()
+    def test_ingestion_failure_propagates(self):
+        source = EntsoeSource()
+        source.fetch = Mock(side_effect=IngestionError("API down"))
+        with pytest.raises(IngestionError):
+            source.ingest()
 
 
 class TestGenerateMockData:
     def test_shape_and_columns(self):
-        df = generate_mock_data(hours=24)
+        df = EntsoeSource().generate_mock_data(hours=24)
         assert "country_code" in df.columns
         assert (df["country_code"] == "IE").all()
         for col in ["Fossil Gas", "Wind Onshore", "Hydro Run-of-river", "Other"]:
             assert col in df.columns
 
     def test_15_minute_frequency(self):
-        df = generate_mock_data(hours=1)
+        df = EntsoeSource().generate_mock_data(hours=1)
         assert len(df) == 5
         deltas = df.index.to_series().diff().dropna().unique()
         assert len(deltas) == 1

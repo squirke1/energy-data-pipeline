@@ -6,13 +6,8 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 
-from ingest_weather import (
-    WeatherIngestionError,
-    fetch_weather,
-    generate_mock_data,
-    ingest_weather_data,
-    save_weather_data,
-)
+from ingest_weather import WeatherSource
+from src.base_source import IngestionError
 from src.raw_store import RawStoreError
 
 
@@ -38,11 +33,11 @@ def mock_response():
     return mock_resp
 
 
-class TestFetchWeather:
+class TestFetch:
     @patch("ingest_weather.requests.get")
     def test_successful_fetch(self, mock_get, mock_response):
         mock_get.return_value = mock_response
-        result = fetch_weather(hours_back=24)
+        result = WeatherSource().fetch(hours_back=24)
         assert len(result) == 4
         assert "location" in result.columns
         assert (result["location"] == "Dublin").all()
@@ -55,68 +50,75 @@ class TestFetchWeather:
         import requests
 
         mock_get.side_effect = requests.exceptions.HTTPError("HTTP 500")
-        with pytest.raises(WeatherIngestionError):
-            fetch_weather()
+        with pytest.raises(IngestionError):
+            WeatherSource().fetch()
 
     @patch("ingest_weather.requests.get")
     def test_missing_hourly_key_raises(self, mock_get):
         mock_resp = Mock()
         mock_resp.json.return_value = {"latitude": 53.35, "longitude": -6.26}
         mock_get.return_value = mock_resp
-        with pytest.raises(WeatherIngestionError, match="Unexpected response shape"):
-            fetch_weather()
+        with pytest.raises(IngestionError, match="Unexpected response shape"):
+            WeatherSource().fetch()
 
     @patch("ingest_weather.requests.get")
     def test_past_days_scales_with_hours_back(self, mock_get, mock_response):
         mock_get.return_value = mock_response
-        fetch_weather(hours_back=50)
+        WeatherSource().fetch(hours_back=50)
         _, kwargs = mock_get.call_args
         assert kwargs["params"]["past_days"] == 3
 
 
-class TestSaveWeatherData:
-    @patch("ingest_weather.save_raw")
-    def test_saves_to_raw_store(self, mock_save_raw):
-        mock_save_raw.return_value = "abc123"
-        df = generate_mock_data(hours=4)
-        raw_id = save_weather_data(df)
-        mock_save_raw.assert_called_once_with("weather", df)
+class TestSave:
+    def test_saves_to_raw_store(self):
+        mock_raw_store = Mock()
+        mock_raw_store.save_raw.return_value = "abc123"
+        source = WeatherSource(raw_store=mock_raw_store)
+        df = source.generate_mock_data(hours=4)
+
+        raw_id = source.save(df)
+
+        mock_raw_store.save_raw.assert_called_once_with("weather", df)
         assert raw_id == "abc123"
 
-    @patch("ingest_weather.save_raw")
-    def test_raw_store_error_wrapped(self, mock_save_raw):
-        mock_save_raw.side_effect = RawStoreError("connection refused")
-        df = generate_mock_data(hours=4)
-        with pytest.raises(WeatherIngestionError, match="Failed to save data"):
-            save_weather_data(df)
+    def test_raw_store_error_wrapped(self):
+        mock_raw_store = Mock()
+        mock_raw_store.save_raw.side_effect = RawStoreError("connection refused")
+        source = WeatherSource(raw_store=mock_raw_store)
+        df = source.generate_mock_data(hours=4)
+
+        with pytest.raises(IngestionError, match="Failed to save data"):
+            source.save(df)
 
 
-class TestIngestWeatherData:
-    @patch("ingest_weather.save_weather_data")
-    @patch("ingest_weather.fetch_weather")
-    def test_successful_ingestion(self, mock_fetch, mock_save):
-        mock_fetch.return_value = generate_mock_data(hours=4)
-        mock_save.return_value = "abc123"
-        result = ingest_weather_data(hours_back=24)
-        mock_fetch.assert_called_once_with(24)
-        mock_save.assert_called_once()
+class TestIngest:
+    def test_successful_ingestion(self):
+        source = WeatherSource()
+        mock_df = source.generate_mock_data(hours=4)
+        source.fetch = Mock(return_value=mock_df)
+        source.save = Mock(return_value="abc123")
+
+        result = source.ingest(hours_back=24)
+
+        source.fetch.assert_called_once_with(24)
+        source.save.assert_called_once()
         assert result == "abc123"
 
-    @patch("ingest_weather.fetch_weather")
-    def test_ingestion_failure_propagates(self, mock_fetch):
-        mock_fetch.side_effect = WeatherIngestionError("API down")
-        with pytest.raises(WeatherIngestionError):
-            ingest_weather_data()
+    def test_ingestion_failure_propagates(self):
+        source = WeatherSource()
+        source.fetch = Mock(side_effect=IngestionError("API down"))
+        with pytest.raises(IngestionError):
+            source.ingest()
 
 
 class TestGenerateMockData:
     def test_shape_and_columns(self):
-        df = generate_mock_data(hours=24)
+        df = WeatherSource().generate_mock_data(hours=24)
         assert "location" in df.columns
         assert (df["location"] == "Dublin").all()
         for col in ["temperature_2m", "wind_speed_10m", "shortwave_radiation"]:
             assert col in df.columns
 
     def test_hourly_frequency(self):
-        df = generate_mock_data(hours=5)
+        df = WeatherSource().generate_mock_data(hours=5)
         assert len(df) == 6
