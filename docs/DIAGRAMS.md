@@ -4,7 +4,7 @@ Reference diagrams for `energy-data-pipeline`. These render natively on GitHub (
 
 ## System context (C4 level 1)
 
-The zoomed-out view before the detail: what's inside the system boundary versus what's external to it. One actor (a developer or a CI job, running the same CLI either way), three external data sources, one local sink.
+The zoomed-out view before the detail: what's inside the system boundary versus what's external to it. One actor (a developer or a CI job, running the same CLI either way), three external data sources, two local sinks - a relational store for trusted data and a document store for raw payloads.
 
 ```mermaid
 C4Context
@@ -18,18 +18,20 @@ C4Context
     System_Ext(carbon, "UK Carbon Intensity API", "GB generation mix + carbon intensity. Official (National Grid ESO), fully public, no auth")
     System_Ext(meteo, "Open-Meteo", "Weather data (temperature, wind, solar radiation). Fully public, no auth")
 
-    SystemDb(db, "data/energy.db", "Local SQLite database - generation_fact, generation_summary, pipeline_runs")
+    SystemDb(pg, "Postgres", "Validated/transformed data - generation_fact, generation_summary, pipeline_runs")
+    SystemDb(mongo, "MongoDB", "Raw ingested payloads, as received - raw_ingestions collection")
 
     Rel(dev, pipeline, "Runs", "CLI, --mock or live")
     Rel(pipeline, entsoe, "Fetches generation data", "HTTPS + token")
     Rel(pipeline, carbon, "Fetches generation mix", "HTTPS")
     Rel(pipeline, meteo, "Fetches weather data", "HTTPS")
-    Rel(pipeline, db, "Reads / writes", "sqlite3")
+    Rel(pipeline, pg, "Reads / writes", "psycopg2")
+    Rel(pipeline, mongo, "Writes", "pymongo")
 ```
 
 ## System architecture
 
-Three independently-authenticated sources, coordinated by `orchestrate.py`. Only ENTSO-E has the `fuel_type`/`is_renewable` shape that `validate.py`/`transform_energy.py` are built around, so it's the only source that earns the full validate → transform → load path into `generation_fact`/`generation_summary`. The GB carbon-intensity source and weather both go straight to storage plus the shared run-log instead of being forced into a schema that doesn't fit their data.
+Three independently-authenticated sources, coordinated by `orchestrate.py`. Every source's raw payload goes to MongoDB via the shared `raw_store.py` first - that's the "bronze" layer, schema-flexible on purpose. Only ENTSO-E has the `fuel_type`/`is_renewable` shape that `validate.py`/`transform_energy.py` are built around, so it's the only source that additionally earns the validate → transform → load path into Postgres's `generation_fact`/`generation_summary` - the "silver" layer.
 
 ```mermaid
 flowchart TD
@@ -49,22 +51,19 @@ flowchart TD
     CARBON --> I_CARBON
     METEO --> I_WEATHER
 
-    I_ENTSOE --> RAW[("data/raw/*.csv, *.json")]
-    I_CARBON --> RAW
-    I_WEATHER --> RAW
+    I_ENTSOE --> RAWSTORE["raw_store.py<br/>save_raw()"]
+    I_CARBON --> RAWSTORE
+    I_WEATHER --> RAWSTORE
+    RAWSTORE --> MONGO[("MongoDB<br/>raw_ingestions")]
 
     I_ENTSOE --> VALIDATE["validate.py<br/>validate_generation_df()"]
     VALIDATE --> TRANSFORM["transform_energy.py<br/>melt, flag renewables,<br/>compute carbon intensity"]
     TRANSFORM --> LOAD["load_db.py<br/>load_generation_fact()<br/>load_generation_summary()"]
 
-    I_CARBON --> SAVE_C["save_generation_mix_data()"]
-    I_WEATHER --> SAVE_W["save_weather_data()"]
-
-    LOAD --> DB[("data/energy.db — SQLite")]
-    SAVE_C --> RUNLOG["log_pipeline_run()"]
-    SAVE_W --> RUNLOG
-    LOAD --> RUNLOG
-    RUNLOG --> DB
+    LOAD --> PG[("Postgres<br/>generation_fact, generation_summary")]
+    LOAD --> RUNLOG["log_pipeline_run()"]
+    RAWSTORE -.after save.-> RUNLOG
+    RUNLOG --> PG
 
     ORCH["orchestrate.py"]:::orch -.controls.-> I_ENTSOE
     ORCH -.controls.-> I_CARBON
@@ -78,7 +77,7 @@ flowchart TD
 
 ## Data flow (swimlanes by source)
 
-Each source is its own lane through `orchestrate.py`. ENTSO-E earns its way into `generation_fact`/`generation_summary` through validate → transform → load, and can fail at the validate step; the GB carbon-intensity source and weather have no `fuel_type`/MW generation shape to validate or transform against, so their lanes are shorter by design, not by omission. All three converge on the same `log_pipeline_run()` call, so every run - success or failure, any source - lands in one queryable place.
+Each source is its own lane through `orchestrate.py`. ENTSO-E earns its way into Postgres's `generation_fact`/`generation_summary` through validate → transform → load, and can fail at the validate step; the GB carbon-intensity source and weather have no `fuel_type`/MW generation shape to validate or transform against, so their lanes are shorter by design, not by omission - straight to MongoDB. All three converge on the same `log_pipeline_run()` call regardless of which raw store they used, so every run - success or failure, any source - lands in one queryable Postgres table.
 
 ```mermaid
 flowchart TB
@@ -92,19 +91,23 @@ flowchart TB
 
     subgraph L2["Carbon intensity lane (GB)"]
         direction LR
-        B1["Fetch<br/>(live or --mock)"] --> B2["Save raw CSV/JSON<br/>to data/raw/"]
+        B1["Fetch<br/>(live or --mock)"] --> B2["save_raw()<br/>to MongoDB"]
     end
 
     subgraph L3["Weather lane"]
         direction LR
-        C1["Fetch<br/>(live or --mock)"] --> C2["Save raw CSV/JSON<br/>to data/raw/"]
+        C1["Fetch<br/>(live or --mock)"] --> C2["save_raw()<br/>to MongoDB"]
     end
+
+    A4 --> PG[("Postgres")]
+    B2 --> MONGO[("MongoDB")]
+    C2 --> MONGO
 
     A4 --> LOG["log_pipeline_run(source, status)"]
     A5 --> LOG
     B2 --> LOG
     C2 --> LOG
-    LOG --> DB[("data/energy.db")]
+    LOG --> PG
 ```
 
 ## Run sequence (success and failure paths)
@@ -119,7 +122,7 @@ sequenceDiagram
     participant Val as validate.py
     participant Trans as transform_energy.py
     participant Load as load_db.py
-    participant DB as data/energy.db
+    participant DB as Postgres
 
     CLI->>Orch: run_entsoe_pipeline(mock=True)
     Orch->>Load: init_db()
@@ -148,32 +151,34 @@ sequenceDiagram
 
 ## Database schema
 
-SQLite, created and upserted by `load_db.py`. Fact and summary rows aren't linked by a foreign key — they're correlated by `(timestamp, country_code)`, which is also the natural join key for a future weather-vs-generation analysis (Stage 6).
+### Postgres (trusted / validated data)
+
+Created and upserted by `load_db.py`, via `INSERT ... ON CONFLICT DO UPDATE`. Fact and summary rows aren't linked by a foreign key — they're correlated by `(timestamp, country_code)`, which is also the natural join key for a future weather-vs-generation analysis (Stage 6).
 
 ```mermaid
 erDiagram
     generation_fact {
-        int id PK
-        text timestamp
+        serial id PK
+        timestamptz timestamp
         text country_code
         text fuel_type
-        real generation_mw
-        int is_renewable
-        text processed_at
+        double generation_mw
+        boolean is_renewable
+        timestamptz processed_at
     }
     generation_summary {
-        int id PK
-        text timestamp
+        serial id PK
+        timestamptz timestamp
         text country_code
-        real total_generation_mw
-        real renewable_mw
-        real renewable_pct
-        real carbon_intensity_g_per_kwh
-        text processed_at
+        double total_generation_mw
+        double renewable_mw
+        double renewable_pct
+        double carbon_intensity_g_per_kwh
+        timestamptz processed_at
     }
     pipeline_runs {
-        int id PK
-        text run_at
+        serial id PK
+        timestamptz run_at
         text source
         int rows_loaded
         text status
@@ -183,17 +188,34 @@ erDiagram
     generation_fact }o..o{ generation_summary : "same timestamp + country_code"
 ```
 
+### MongoDB (raw / bronze layer)
+
+One `raw_ingestions` collection, shared by all three sources - `raw_store.py` is the only code that writes to it. No fixed schema: `payload` is whatever shape the source's DataFrame produced, which is exactly the point - a new source, or a source's API changing shape, needs no migration here.
+
+```json
+{
+  "_id": ObjectId("..."),
+  "source": "weather",
+  "ingested_at": ISODate("2026-08-06T11:55:36.999Z"),
+  "format": "records",
+  "payload": [
+    { "index": "2026-08-06T10:00:00+01:00", "temperature_2m": 15.6, "wind_speed_10m": 8.6, "location": "Dublin" },
+    { "index": "2026-08-06T11:00:00+01:00", "temperature_2m": 16.1, "wind_speed_10m": 9.2, "location": "Dublin" }
+  ]
+}
+```
+
 ## CI/CD pipeline
 
-From `.github/workflows/ci.yml`. Every push and PR gets linted and tested across both Python versions; only branches actually headed to production get packaged.
+From `.github/workflows/ci.yml`. Every push and PR gets linted and tested across both Python versions; only branches actually headed to production get packaged. Postgres and MongoDB run as GitHub Actions **service containers** - ephemeral, one per job run, on the runner's default ports (no local-port-collision workaround needed there, unlike `docker-compose.yml`).
 
 ```mermaid
 flowchart TD
-    TRIGGER["push or pull_request<br/>main, develop, feature/**, release/**, hotfix/**"] --> M1
+    TRIGGER["push or pull_request<br/>main, develop, feature/**, release/**, hotfix/**"] --> SVC
 
     subgraph matrix["Lint and Test — matrix: Python 3.10, 3.11"]
         direction LR
-        M1["Checkout"] --> M2["Set up Python"] --> M3["pip install -r requirements.txt<br/>pip install pytest ruff"] --> M4["ruff check src tests"] --> M5["pytest tests/ -v"]
+        SVC["Start service containers<br/>postgres:16-alpine, mongo:7<br/>(health-checked before job proceeds)"] --> M1["Checkout"] --> M2["Set up Python"] --> M3["pip install -r requirements.txt<br/>pip install pytest ruff"] --> M4["ruff check src tests"] --> M5["pytest tests/ -v<br/>(hits the service containers)"]
     end
 
     M5 --> GATE{"branch is<br/>main / release/* / hotfix/*?"}
