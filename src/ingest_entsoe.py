@@ -63,14 +63,14 @@ class EntsoeSource(BaseSource):
 
         date_range = pd.date_range(start=start, end=end, freq="15min")
 
-        data = {
+        generation_by_fuel = {
             "Fossil Gas": [800 + i * 10 % 200 for i in range(len(date_range))],
             "Wind Onshore": [500 + i * 15 % 600 for i in range(len(date_range))],
             "Hydro Run-of-river": [50 + i * 2 % 30 for i in range(len(date_range))],
             "Other": [100 + i * 5 % 50 for i in range(len(date_range))],
         }
 
-        df = pd.DataFrame(data, index=date_range)
+        df = pd.DataFrame(generation_by_fuel, index=date_range)
         df["country_code"] = self.country_code
         return df
 

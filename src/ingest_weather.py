@@ -1,4 +1,5 @@
 import logging
+import math
 from typing import ClassVar
 
 import pandas as pd
@@ -38,7 +39,7 @@ class WeatherSource(BaseSource):
     HOURLY_VARIABLES: ClassVar[list[str]] = ["temperature_2m", "wind_speed_10m", "shortwave_radiation"]
 
     def fetch(self, hours_back: int = 24) -> pd.DataFrame:
-        past_days = max(1, -(-hours_back // 24))  # ceil division, Open-Meteo min is 1
+        past_days = max(1, math.ceil(hours_back / 24))  # Open-Meteo minimum is 1
         params = {
             "latitude": WEATHER_LATITUDE,
             "longitude": WEATHER_LONGITUDE,
@@ -74,7 +75,7 @@ class WeatherSource(BaseSource):
         start = end - pd.Timedelta(hours=hours)
         date_range = pd.date_range(start=start, end=end, freq="1h")
 
-        data = {
+        readings = {
             "temperature_2m": [8 + (i % 6) * 0.5 for i in range(len(date_range))],
             "wind_speed_10m": [15 + (i * 3 % 25) for i in range(len(date_range))],
             "shortwave_radiation": [
@@ -82,7 +83,7 @@ class WeatherSource(BaseSource):
             ],
         }
 
-        df = pd.DataFrame(data, index=date_range)
+        df = pd.DataFrame(readings, index=date_range)
         df["location"] = WEATHER_LOCATION_NAME
         return df
 

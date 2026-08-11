@@ -49,15 +49,15 @@ class Orchestrator:
             summary_rows = self.db.load_generation_summary(summary_df)
 
             self.db.log_pipeline_run("entsoe", fact_rows, "success")
-            result = {
+            run_summary = {
                 "status": "success",
                 "source": "entsoe",
                 "fact_rows": fact_rows,
                 "summary_rows": summary_rows,
                 "validation": validation.summary(),
             }
-            logger.info(f"ENTSOE pipeline complete: {result}")
-            return result
+            logger.info(f"ENTSOE pipeline complete: {run_summary}")
+            return run_summary
 
         except (IngestionError, ValueError) as e:
             self.db.log_pipeline_run("entsoe", 0, "failed", str(e))
@@ -79,14 +79,14 @@ class Orchestrator:
             raw_id = source.save(df)
 
             self.db.log_pipeline_run(source.source_name, len(df), "success")
-            result = {
+            run_summary = {
                 "status": "success",
                 "source": source.source_name,
                 "rows": len(df),
                 "raw_id": raw_id,
             }
-            logger.info(f"{source.source_name} pipeline complete: {result}")
-            return result
+            logger.info(f"{source.source_name} pipeline complete: {run_summary}")
+            return run_summary
 
         except IngestionError as e:
             self.db.log_pipeline_run(source.source_name, 0, "failed", str(e))
