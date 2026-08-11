@@ -48,7 +48,15 @@ class EntsoeSource(BaseSource):
                 # Aggregated" (generation) and "Actual Consumption" columns.
                 # Only generation output belongs in this pipeline's fuel_type
                 # rows, so keep the aggregated level and flatten it away.
-                df = df.xs("Actual Aggregated", axis=1, level=1)
+                selected = df.xs("Actual Aggregated", axis=1, level=1)
+                # .xs() can collapse to a Series if only one column remains -
+                # assert rather than trust the type hint, since this exact
+                # method already exists because ENTSO-E's real response
+                # shape once surprised this pipeline.
+                assert isinstance(selected, pd.DataFrame), (
+                    f"Expected DataFrame after .xs(), got {type(selected).__name__}"
+                )
+                df = selected
 
             df["country_code"] = self.country_code
             logger.info(f"Fetched {len(df)} rows")
