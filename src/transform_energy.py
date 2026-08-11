@@ -117,13 +117,13 @@ class GenerationTransformer:
         long_df["processed_at"] = pd.Timestamp.now(tz="UTC")
 
         summary_df = self.compute_generation_summary(long_df)
-        ci = self.compute_carbon_intensity(long_df)
+        carbon_intensity = self.compute_carbon_intensity(long_df)
 
         merge_cols = ["timestamp"]
         if "country_code" in summary_df.columns:
             merge_cols.append("country_code")
 
-        summary_df = summary_df.merge(ci.reset_index(), on=merge_cols, how="left")
+        summary_df = summary_df.merge(carbon_intensity.reset_index(), on=merge_cols, how="left")
         summary_df["processed_at"] = pd.Timestamp.now(tz="UTC")
 
         logger.info(
