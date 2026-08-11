@@ -162,7 +162,7 @@ class PostgresDatabase:
         if missing:
             raise ValueError(f"Missing columns: {missing}")
 
-        optional = {
+        optional_columns = {
             "total_generation_mw",
             "renewable_mw",
             "renewable_pct",
@@ -174,11 +174,11 @@ class PostgresDatabase:
         if "processed_at" in records.columns:
             records["processed_at"] = records["processed_at"].astype(str)
 
-        for col in optional:
+        for col in optional_columns:
             if col not in records.columns:
                 records[col] = None
 
-        optional_cols = sorted(optional)
+        optional_cols = sorted(optional_columns)
         cols = ["timestamp", "country_code"] + optional_cols
         rows = records[cols].values.tolist()
 

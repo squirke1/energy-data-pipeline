@@ -77,13 +77,13 @@ class CarbonIntensitySource(BaseSource):
 
         # Roughly realistic GB mix (sums to 100), with wind share oscillating
         # over the window and gas absorbing the difference.
-        base = {"gas": 15, "coal": 0, "biomass": 5, "nuclear": 15, "hydro": 3,
-                "imports": 12, "other": 5, "wind": 35, "solar": 10}
+        base_mix = {"gas": 15, "coal": 0, "biomass": 5, "nuclear": 15, "hydro": 3,
+                    "imports": 12, "other": 5, "wind": 35, "solar": 10}
 
         rows = []
         for i in range(len(date_range)):
             wind_shift = (i % 20) - 10
-            row = dict(base)
+            row = dict(base_mix)
             row["wind"] = max(0, row["wind"] + wind_shift)
             row["gas"] = max(0, row["gas"] - wind_shift)
             rows.append(row)

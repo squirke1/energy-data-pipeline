@@ -82,9 +82,9 @@ class RawStore:
         }
 
         try:
-            result = self._get_collection().insert_one(document)
-            logger.info(f"Saved raw {source} document {result.inserted_id}")
-            return str(result.inserted_id)
+            insert_result = self._get_collection().insert_one(document)
+            logger.info(f"Saved raw {source} document {insert_result.inserted_id}")
+            return str(insert_result.inserted_id)
         except Exception as e:
             logger.error(f"Failed to save raw {source} document: {e}")
             raise RawStoreError(str(e)) from e
