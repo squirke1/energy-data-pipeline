@@ -1,5 +1,6 @@
 import atexit
 import logging
+import threading
 from datetime import datetime, timezone
 from typing import Any
 
@@ -48,13 +49,22 @@ class RawStore:
     """
 
     _client: MongoClient | None = None
+    _client_lock = threading.Lock()
 
     def _get_client(self) -> MongoClient:
         cls = type(self)
         if cls._client is None:
-            uri = f"mongodb://{MONGO_USER}:{MONGO_PASSWORD}@{MONGO_HOST}:{MONGO_PORT}/"
-            cls._client = MongoClient(uri, serverSelectionTimeoutMS=5000)
-            atexit.register(cls._client.close)
+            # Double-checked locking: Orchestrator.run_all() can construct
+            # a WeatherSource and a CarbonIntensitySource concurrently in
+            # separate threads, each creating its own RawStore() instance
+            # that reads/writes this shared class attribute - without the
+            # lock, both could see _client as None and race to create two
+            # MongoClients, leaking one.
+            with cls._client_lock:
+                if cls._client is None:
+                    uri = f"mongodb://{MONGO_USER}:{MONGO_PASSWORD}@{MONGO_HOST}:{MONGO_PORT}/"
+                    cls._client = MongoClient(uri, serverSelectionTimeoutMS=5000)
+                    atexit.register(cls._client.close)
         return cls._client
 
     def _get_collection(self) -> Collection:
