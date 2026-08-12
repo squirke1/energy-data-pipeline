@@ -1,5 +1,6 @@
 import logging
 import sys
+from concurrent.futures import ThreadPoolExecutor
 
 from base_source import BaseSource, IngestionError
 from config import LOG_DATE_FORMAT, LOG_FORMAT, LOG_LEVEL
@@ -103,6 +104,54 @@ class Orchestrator:
     ) -> dict:
         return self._run_raw_only_pipeline(source or CarbonIntensitySource(), hours_back, mock)
 
+    def run_all(self, hours_back: int = 24, mock: bool = False) -> dict[str, dict]:
+        """Run all three sources concurrently instead of one after another.
+
+        They're independent I/O-bound calls (HTTP fetch + DB write) with no
+        shared state between them, so threads - not processes - are the
+        right tool: requests/psycopg2/pymongo all release the GIL during
+        I/O waits, so three threads genuinely overlap their waiting time
+        instead of contending for a CPU nothing here is bottlenecked on.
+        Wall-clock time drops to roughly the slowest source instead of the
+        sum of all three.
+
+        init_db() runs once here, up front, rather than once per thread
+        inside each run_*() call: concurrent first-time "CREATE TABLE IF
+        NOT EXISTS" calls from separate Postgres connections can race and
+        raise a duplicate-key error, since the existence check and the
+        creation aren't atomic across sessions.
+        """
+        self.db.init_db()
+
+        jobs = {
+            "entsoe": lambda: self.run_entsoe(hours_back=hours_back, mock=mock),
+            "carbon_intensity": lambda: self.run_carbon_intensity(hours_back=hours_back, mock=mock),
+            "weather": lambda: self.run_weather(hours_back=hours_back, mock=mock),
+        }
+
+        with ThreadPoolExecutor(max_workers=len(jobs)) as executor:
+            # Submitting all three up front starts them concurrently; the
+            # dict below is iterated in a fixed order purely so results
+            # come back in a predictable order, regardless of which source
+            # actually finishes first.
+            futures = {source_name: executor.submit(job) for source_name, job in jobs.items()}
+
+            run_summaries: dict[str, dict] = {}
+            for source_name, future in futures.items():
+                try:
+                    run_summaries[source_name] = future.result()
+                except Exception as e:  # noqa: BLE001 - isolate one source's failure from the others
+                    logger.error(f"{source_name} pipeline failed: {e}")
+                    run_summaries[source_name] = {
+                        "status": "failed",
+                        "source": source_name,
+                        "error": str(e),
+                    }
+
+        return run_summaries
+
+
+DISPLAY_LABELS = {"entsoe": "ENTSOE", "carbon_intensity": "Carbon intensity", "weather": "Weather"}
 
 if __name__ == "__main__":
     use_mock = "--mock" in sys.argv
@@ -113,20 +162,13 @@ if __name__ == "__main__":
 
     orchestrator = Orchestrator()
 
-    if selected_source in ("entsoe", "all"):
+    if selected_source == "all":
+        # run_all() runs all three sources concurrently (see its docstring)
+        for source_name, run_summary in orchestrator.run_all(mock=use_mock).items():
+            print(f"{DISPLAY_LABELS[source_name]}: {run_summary}")
+    else:
+        run_method = getattr(orchestrator, f"run_{selected_source}")
         try:
-            print(f"ENTSOE: {orchestrator.run_entsoe(mock=use_mock)}")
-        except Exception as e:  # noqa: BLE001 - top-level CLI catch-all so other sources can still run
-            print(f"ENTSOE failed: {e}")
-
-    if selected_source in ("carbon_intensity", "all"):
-        try:
-            print(f"Carbon intensity: {orchestrator.run_carbon_intensity(mock=use_mock)}")
+            print(f"{DISPLAY_LABELS[selected_source]}: {run_method(mock=use_mock)}")
         except Exception as e:  # noqa: BLE001 - top-level CLI catch-all
-            print(f"Carbon intensity failed: {e}")
-
-    if selected_source in ("weather", "all"):
-        try:
-            print(f"Weather: {orchestrator.run_weather(mock=use_mock)}")
-        except Exception as e:  # noqa: BLE001 - top-level CLI catch-all
-            print(f"Weather failed: {e}")
+            print(f"{DISPLAY_LABELS[selected_source]} failed: {e}")

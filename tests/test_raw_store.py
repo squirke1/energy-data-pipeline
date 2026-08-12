@@ -1,5 +1,8 @@
 import sys
+import threading
+import time
 from pathlib import Path
+from unittest.mock import Mock, patch
 
 import pandas as pd
 import pytest
@@ -48,6 +51,50 @@ class TestSaveRaw:
         doc = store._get_collection().find_one({"source": "weather"})
         assert doc["payload"][0]["temperature_2m"] == 5.1
         assert doc["payload"][0]["location"] == "Dublin"
+
+
+class TestClientThreadSafety:
+    def test_concurrent_first_access_creates_only_one_client(self):
+        """Orchestrator.run_all() constructs sources (each with their own
+        RawStore()) concurrently across threads. All of them read/write the
+        shared RawStore._client class attribute, so first-time creation
+        needs to be race-safe - without the lock in _get_client(), threads
+        can all see _client as None and each construct a MongoClient,
+        leaking every one after the first.
+        """
+        original_client = RawStore._client
+        RawStore._client = None
+        try:
+            with patch("raw_store.MongoClient") as mock_mongo_client_cls:
+                # A fast in-process mock call might not force a thread
+                # switch between the None-check and the assignment even
+                # without the lock, making the race unreliable to observe.
+                # A small sleep widens that window so this test is a
+                # trustworthy regression guard, not a GIL-timing gamble.
+                def slow_construct(*args, **kwargs):
+                    time.sleep(0.01)
+                    return Mock()
+
+                mock_mongo_client_cls.side_effect = slow_construct
+
+                # Line every thread up to hit the None-check at the same
+                # instant, maximising the race window the lock has to close.
+                thread_count = 10
+                barrier = threading.Barrier(thread_count)
+
+                def get_client():
+                    barrier.wait()
+                    RawStore()._get_client()
+
+                threads = [threading.Thread(target=get_client) for _ in range(thread_count)]
+                for t in threads:
+                    t.start()
+                for t in threads:
+                    t.join()
+
+                assert mock_mongo_client_cls.call_count == 1
+        finally:
+            RawStore._client = original_client
 
 
 class TestGetRecentRaw:
