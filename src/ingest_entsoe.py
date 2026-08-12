@@ -1,5 +1,6 @@
 import logging
 import os
+from urllib.parse import urlsplit
 
 import pandas as pd
 from dotenv import load_dotenv
@@ -16,6 +17,21 @@ load_dotenv()
 
 logging.basicConfig(level=LOG_LEVEL, format=LOG_FORMAT, datefmt=LOG_DATE_FORMAT)
 logger = logging.getLogger(__name__)
+
+
+def _sanitize_fetch_error(e: Exception) -> str:
+    """ENTSO-E sends the API key as a `securityToken` query param on every
+    request, and entsoe-py lets requests.HTTPError's default message through
+    unchanged on unrecognised error responses - that message embeds the full
+    request URL, key included. Strip the query string so the key can't end
+    up in logs, stdout, or the pipeline_runs table.
+    """
+    response = getattr(e, "response", None)
+    url = getattr(response, "url", None)
+    if response is not None and url:
+        clean_url = urlsplit(url)._replace(query="").geturl()
+        return f"{response.status_code} error for url: {clean_url}"
+    return str(e)
 
 
 class EntsoeSource(BaseSource):
@@ -62,8 +78,9 @@ class EntsoeSource(BaseSource):
             logger.info(f"Fetched {len(df)} rows")
             return df
         except Exception as e:
-            logger.error(f"Failed to fetch generation: {e}")
-            raise IngestionError(str(e)) from e
+            message = _sanitize_fetch_error(e)
+            logger.error(f"Failed to fetch generation: {message}")
+            raise IngestionError(message) from e
 
     def generate_mock_data(self, hours: int = 24) -> pd.DataFrame:
         end = pd.Timestamp.now(tz="Europe/Dublin")
