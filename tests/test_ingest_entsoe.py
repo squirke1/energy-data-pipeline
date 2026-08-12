@@ -4,6 +4,7 @@ from unittest.mock import Mock, patch
 
 import pandas as pd
 import pytest
+import requests
 
 sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 
@@ -57,6 +58,36 @@ class TestFetch:
         mock_get_client.side_effect = IngestionError("no key")
         with pytest.raises(IngestionError):
             EntsoeSource().fetch()
+
+    @patch("ingest_entsoe.EntsoeSource.get_client")
+    def test_fetch_failure_strips_api_key_from_url(self, mock_get_client):
+        # entsoe-py sends the API key as a `securityToken` query param on
+        # every request, and re-raises requests.HTTPError unchanged for
+        # unrecognised error responses. Build a *real* Response and call its
+        # actual raise_for_status() - a hand-rolled HTTPError message would
+        # sidestep the exact bug this test guards against, since requests
+        # itself is what embeds the full URL (key included) into the
+        # exception's default string form.
+        response = requests.Response()
+        response.status_code = 400
+        response.reason = "Bad Request"
+        response.url = (
+            "https://web-api.tp.entsoe.eu/api?securityToken=super-secret-key&documentType=A75"
+        )
+
+        mock_client = Mock()
+
+        def raise_http_error(*args, **kwargs):
+            response.raise_for_status()
+
+        mock_client.query_generation.side_effect = raise_http_error
+        mock_get_client.return_value = mock_client
+
+        with pytest.raises(IngestionError) as exc_info:
+            EntsoeSource().fetch()
+
+        assert "super-secret-key" not in str(exc_info.value)
+        assert "securityToken" not in str(exc_info.value)
 
     @patch("ingest_entsoe.EntsoeSource.get_client")
     def test_multiindex_columns_flattened(self, mock_get_client):
