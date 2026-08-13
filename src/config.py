@@ -19,6 +19,10 @@ POSTGRES_PORT = int(os.getenv("POSTGRES_PORT", "5433"))
 POSTGRES_DB = os.getenv("POSTGRES_DB", "energy_pipeline")
 POSTGRES_USER = os.getenv("POSTGRES_USER", "pipeline")
 POSTGRES_PASSWORD = os.getenv("POSTGRES_PASSWORD", "pipeline")
+# "prefer" (psycopg2's own default) works for the unencrypted local
+# docker-compose Postgres; the scheduled production workflow overrides this
+# to "require" for a managed Postgres (e.g. Neon) reachable over the internet.
+POSTGRES_SSLMODE = os.getenv("POSTGRES_SSLMODE", "prefer")
 
 # ENTSO-E API Configuration
 # Get API key from: https://transparency.entsoe.eu/content/static_content/Static%20content/web%20api/Guide.html

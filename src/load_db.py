@@ -18,6 +18,7 @@ try:
         POSTGRES_HOST,
         POSTGRES_PASSWORD,
         POSTGRES_PORT,
+        POSTGRES_SSLMODE,
         POSTGRES_USER,
     )
 except ImportError:
@@ -29,6 +30,7 @@ except ImportError:
         POSTGRES_HOST,
         POSTGRES_PASSWORD,
         POSTGRES_PORT,
+        POSTGRES_SSLMODE,
         POSTGRES_USER,
     )
 
@@ -104,12 +106,14 @@ class PostgresDatabase:
         dbname: str = POSTGRES_DB,
         user: str = POSTGRES_USER,
         password: str = POSTGRES_PASSWORD,
+        sslmode: str = POSTGRES_SSLMODE,
     ):
         self.host = host
         self.port = port
         self.dbname = dbname
         self.user = user
         self.password = password
+        self.sslmode = sslmode
 
     @contextmanager
     def connection(self) -> Generator[psycopg2.extensions.connection, None, None]:
@@ -119,6 +123,7 @@ class PostgresDatabase:
             dbname=self.dbname,
             user=self.user,
             password=self.password,
+            sslmode=self.sslmode,
         )
         try:
             yield conn
