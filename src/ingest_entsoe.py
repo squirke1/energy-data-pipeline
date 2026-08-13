@@ -8,10 +8,18 @@ from entsoe.entsoe import EntsoePandasClient
 
 try:
     from src.base_source import BaseSource, IngestionError
-    from src.config import LOG_DATE_FORMAT, LOG_FORMAT, LOG_LEVEL
+    from src.config import (
+        LOG_DATE_FORMAT,
+        LOG_FORMAT,
+        LOG_LEVEL,
+        MAX_RETRIES,
+        RETRY_DELAY,
+    )
+    from src.retry import is_retryable_request_error, retry_with_backoff
 except ImportError:
     from base_source import BaseSource, IngestionError
-    from config import LOG_DATE_FORMAT, LOG_FORMAT, LOG_LEVEL
+    from config import LOG_DATE_FORMAT, LOG_FORMAT, LOG_LEVEL, MAX_RETRIES, RETRY_DELAY
+    from retry import is_retryable_request_error, retry_with_backoff
 
 load_dotenv()
 
@@ -49,6 +57,10 @@ class EntsoeSource(BaseSource):
             )
         return EntsoePandasClient(api_key=api_key)
 
+    @retry_with_backoff(MAX_RETRIES, RETRY_DELAY, is_retryable_request_error)
+    def _query_generation(self, client: EntsoePandasClient, start: pd.Timestamp, end: pd.Timestamp):
+        return client.query_generation(country_code=self.country_code, start=start, end=end)
+
     def fetch(self, hours_back: int = 24) -> pd.DataFrame:
         end = pd.Timestamp.now(tz="Europe/Dublin")
         start = end - pd.Timedelta(hours=hours_back)
@@ -56,7 +68,7 @@ class EntsoeSource(BaseSource):
 
         try:
             client = self.get_client()
-            df = client.query_generation(country_code=self.country_code, start=start, end=end)
+            df = self._query_generation(client, start, end)
             df.index = df.index.tz_convert("Europe/Dublin")  # type: ignore[attr-defined]
 
             if isinstance(df.columns, pd.MultiIndex):

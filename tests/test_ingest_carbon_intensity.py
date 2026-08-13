@@ -64,6 +64,45 @@ class TestFetch:
         with pytest.raises(IngestionError):
             CarbonIntensitySource().fetch()
 
+    @patch("retry.time.sleep")
+    @patch("ingest_carbon_intensity.requests.get")
+    def test_retries_on_transient_error_then_succeeds(self, mock_get, mock_sleep, mock_response):
+        import requests
+
+        mock_get.side_effect = [requests.exceptions.Timeout("timed out"), mock_response]
+
+        result = CarbonIntensitySource().fetch(hours_back=24)
+
+        assert len(result) == 2
+        assert mock_get.call_count == 2
+
+    @patch("retry.time.sleep")
+    @patch("ingest_carbon_intensity.requests.get")
+    def test_exhausts_retries_on_persistent_5xx(self, mock_get, mock_sleep):
+        import requests
+
+        response = Mock(status_code=503)
+        mock_get.side_effect = requests.exceptions.HTTPError(response=response)
+
+        with pytest.raises(IngestionError):
+            CarbonIntensitySource().fetch()
+
+        assert mock_get.call_count == 4  # MAX_RETRIES=3 retries + the first attempt
+
+    @patch("retry.time.sleep")
+    @patch("ingest_carbon_intensity.requests.get")
+    def test_no_retry_on_4xx_client_error(self, mock_get, mock_sleep):
+        import requests
+
+        response = Mock(status_code=400)
+        mock_get.side_effect = requests.exceptions.HTTPError(response=response)
+
+        with pytest.raises(IngestionError):
+            CarbonIntensitySource().fetch()
+
+        mock_get.assert_called_once()
+        mock_sleep.assert_not_called()
+
     @patch("ingest_carbon_intensity.requests.get")
     def test_missing_data_key_raises(self, mock_get):
         mock_resp = Mock()

@@ -13,8 +13,11 @@ try:
         LOG_DATE_FORMAT,
         LOG_FORMAT,
         LOG_LEVEL,
+        MAX_RETRIES,
         REQUEST_TIMEOUT,
+        RETRY_DELAY,
     )
+    from src.retry import is_retryable_request_error, retry_with_backoff
 except ImportError:
     from base_source import BaseSource, IngestionError
     from config import (
@@ -23,8 +26,11 @@ except ImportError:
         LOG_DATE_FORMAT,
         LOG_FORMAT,
         LOG_LEVEL,
+        MAX_RETRIES,
         REQUEST_TIMEOUT,
+        RETRY_DELAY,
     )
+    from retry import is_retryable_request_error, retry_with_backoff
 
 logging.basicConfig(level=LOG_LEVEL, format=LOG_FORMAT, datefmt=LOG_DATE_FORMAT)
 logger = logging.getLogger(__name__)
@@ -37,6 +43,12 @@ class CarbonIntensitySource(BaseSource):
     ]
     ISO_FORMAT = "%Y-%m-%dT%H:%MZ"
 
+    @retry_with_backoff(MAX_RETRIES, RETRY_DELAY, is_retryable_request_error)
+    def _fetch_raw(self, url: str) -> dict:
+        response = requests.get(url, timeout=REQUEST_TIMEOUT)
+        response.raise_for_status()
+        return response.json()
+
     def fetch(self, hours_back: int = 24) -> pd.DataFrame:
         end = datetime.now(timezone.utc)
         start = end - timedelta(hours=hours_back)
@@ -44,9 +56,7 @@ class CarbonIntensitySource(BaseSource):
         logger.info(f"Fetching {CARBON_INTENSITY_COUNTRY_CODE} generation mix from {start} to {end}")
 
         try:
-            response = requests.get(url, timeout=REQUEST_TIMEOUT)
-            response.raise_for_status()
-            payload = response.json()
+            payload = self._fetch_raw(url)
         except requests.exceptions.RequestException as e:
             logger.error(f"Failed to fetch generation mix: {e}")
             raise IngestionError(str(e)) from e
