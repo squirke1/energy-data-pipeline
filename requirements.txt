@@ -1,12 +1,12 @@
 # Core dependencies
-requests>=2.31.0
+requests>=2.33.0
 pandas>=2.0.0
 entsoe-py>=0.5.10
-python-dotenv>=1.0.0
+python-dotenv>=1.2.2
 psycopg2-binary>=2.9.9
 
 # Development and testing
-pytest>=7.4.0
+pytest>=9.0.3
 ruff==0.16.1
 
 # Optional: for enhanced data handling
