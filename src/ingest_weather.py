@@ -11,24 +11,30 @@ try:
         LOG_DATE_FORMAT,
         LOG_FORMAT,
         LOG_LEVEL,
+        MAX_RETRIES,
         OPEN_METEO_BASE_URL,
         REQUEST_TIMEOUT,
+        RETRY_DELAY,
         WEATHER_LATITUDE,
         WEATHER_LOCATION_NAME,
         WEATHER_LONGITUDE,
     )
+    from src.retry import is_retryable_request_error, retry_with_backoff
 except ImportError:
     from base_source import BaseSource, IngestionError
     from config import (
         LOG_DATE_FORMAT,
         LOG_FORMAT,
         LOG_LEVEL,
+        MAX_RETRIES,
         OPEN_METEO_BASE_URL,
         REQUEST_TIMEOUT,
+        RETRY_DELAY,
         WEATHER_LATITUDE,
         WEATHER_LOCATION_NAME,
         WEATHER_LONGITUDE,
     )
+    from retry import is_retryable_request_error, retry_with_backoff
 
 logging.basicConfig(level=LOG_LEVEL, format=LOG_FORMAT, datefmt=LOG_DATE_FORMAT)
 logger = logging.getLogger(__name__)
@@ -37,6 +43,12 @@ logger = logging.getLogger(__name__)
 class WeatherSource(BaseSource):
     source_name = "weather"
     HOURLY_VARIABLES: ClassVar[list[str]] = ["temperature_2m", "wind_speed_10m", "shortwave_radiation"]
+
+    @retry_with_backoff(MAX_RETRIES, RETRY_DELAY, is_retryable_request_error)
+    def _fetch_raw(self, params: dict) -> dict:
+        response = requests.get(OPEN_METEO_BASE_URL, params=params, timeout=REQUEST_TIMEOUT)
+        response.raise_for_status()
+        return response.json()
 
     def fetch(self, hours_back: int = 24) -> pd.DataFrame:
         past_days = max(1, math.ceil(hours_back / 24))  # Open-Meteo minimum is 1
@@ -51,9 +63,7 @@ class WeatherSource(BaseSource):
         logger.info(f"Fetching weather for {WEATHER_LOCATION_NAME} (past_days={past_days})")
 
         try:
-            response = requests.get(OPEN_METEO_BASE_URL, params=params, timeout=REQUEST_TIMEOUT)
-            response.raise_for_status()
-            payload = response.json()
+            payload = self._fetch_raw(params)
         except requests.exceptions.RequestException as e:
             logger.error(f"Failed to fetch weather: {e}")
             raise IngestionError(str(e)) from e

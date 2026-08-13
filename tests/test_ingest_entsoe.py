@@ -59,6 +59,51 @@ class TestFetch:
         with pytest.raises(IngestionError):
             EntsoeSource().fetch()
 
+    @patch("retry.time.sleep")
+    @patch("ingest_entsoe.EntsoeSource.get_client")
+    def test_retries_on_transient_error_then_succeeds(self, mock_get_client, mock_sleep, sample_df):
+        mock_client = Mock()
+        mock_client.query_generation.side_effect = [
+            requests.exceptions.ConnectionError("refused"),
+            sample_df,
+        ]
+        mock_get_client.return_value = mock_client
+
+        result = EntsoeSource(country_code="IE").fetch(hours_back=24)
+
+        assert (result["country_code"] == "IE").all()
+        assert mock_client.query_generation.call_count == 2
+
+    @patch("retry.time.sleep")
+    @patch("ingest_entsoe.EntsoeSource.get_client")
+    def test_exhausts_retries_on_persistent_5xx(self, mock_get_client, mock_sleep):
+        response = Mock(status_code=503, url="https://web-api.tp.entsoe.eu/api?securityToken=x")
+        mock_client = Mock()
+        mock_client.query_generation.side_effect = requests.exceptions.HTTPError(response=response)
+        mock_get_client.return_value = mock_client
+
+        with pytest.raises(IngestionError):
+            EntsoeSource().fetch()
+
+        assert mock_client.query_generation.call_count == 4  # MAX_RETRIES=3 retries + first attempt
+
+    @patch("retry.time.sleep")
+    @patch("ingest_entsoe.EntsoeSource.get_client")
+    def test_no_retry_on_business_error(self, mock_get_client, mock_sleep):
+        # entsoe-py raises its own exceptions (e.g. NoMatchingDataError) for
+        # recognised error bodies - these are business-logic failures (no
+        # data for the requested period), not transient network errors, and
+        # retrying won't change the outcome.
+        mock_client = Mock()
+        mock_client.query_generation.side_effect = ValueError("no data for this period")
+        mock_get_client.return_value = mock_client
+
+        with pytest.raises(IngestionError):
+            EntsoeSource().fetch()
+
+        mock_client.query_generation.assert_called_once()
+        mock_sleep.assert_not_called()
+
     @patch("ingest_entsoe.EntsoeSource.get_client")
     def test_fetch_failure_strips_api_key_from_url(self, mock_get_client):
         # entsoe-py sends the API key as a `securityToken` query param on
