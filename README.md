@@ -160,6 +160,26 @@ CI pipeline runs on all branches and includes:
 - Unit tests with `pytest`
 - Artifact packaging (main branch only)
 
+## Production Deployment
+
+Beyond local development, the pipeline runs unattended on a schedule via a second workflow, `.github/workflows/scheduled-run.yml`, against a free-tier managed Postgres ([Neon](https://neon.tech)) instead of the local `docker-compose.yml` container.
+
+### One-time setup
+
+1. **Create a free Neon project** at [neon.tech](https://neon.tech) and grab its connection details (host, database name, user, password) from the project dashboard.
+2. **Add them as GitHub Actions secrets** on this repo (Settings → Secrets and variables → Actions), or via the CLI - each of these prompts for the value on stdin, so nothing sensitive needs to be pasted into a chat, a PR, or committed to the repo:
+   ```bash
+   gh secret set ENTSOE_API_KEY
+   gh secret set POSTGRES_HOST
+   gh secret set POSTGRES_PORT      # 5432 for Neon
+   gh secret set POSTGRES_DB
+   gh secret set POSTGRES_USER
+   gh secret set POSTGRES_PASSWORD
+   ```
+3. The workflow runs every 6 hours (`workflow_dispatch` also allows a manual run from the Actions tab) and connects with `POSTGRES_SSLMODE=require`, since Neon is reachable over the internet - unlike the local dev Postgres, which has no SSL configured and isn't reachable outside your machine.
+
+Retries (`src/retry.py`) mean a transient failure from any of the three upstream APIs doesn't fail the whole scheduled run - only a persistent one does, visible as a failed run in the Actions tab (and recorded in `pipeline_runs` either way).
+
 ## Development
 
 ### Code Quality
