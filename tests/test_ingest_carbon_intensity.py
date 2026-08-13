@@ -8,7 +8,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 
 from ingest_carbon_intensity import CarbonIntensitySource
 from src.base_source import IngestionError
-from src.raw_store import RawStoreError
+from src.load_db import RawStoreError
 
 
 @pytest.fixture
@@ -75,20 +75,20 @@ class TestFetch:
 
 class TestSave:
     def test_saves_to_raw_store(self):
-        mock_raw_store = Mock()
-        mock_raw_store.save_raw.return_value = "abc123"
-        source = CarbonIntensitySource(raw_store=mock_raw_store)
+        mock_db = Mock()
+        mock_db.save_raw.return_value = "abc123"
+        source = CarbonIntensitySource(db=mock_db)
         df = source.generate_mock_data(hours=4)
 
         raw_id = source.save(df)
 
-        mock_raw_store.save_raw.assert_called_once_with("carbon_intensity", df)
+        mock_db.save_raw.assert_called_once_with("carbon_intensity", df)
         assert raw_id == "abc123"
 
     def test_raw_store_error_wrapped(self):
-        mock_raw_store = Mock()
-        mock_raw_store.save_raw.side_effect = RawStoreError("connection refused")
-        source = CarbonIntensitySource(raw_store=mock_raw_store)
+        mock_db = Mock()
+        mock_db.save_raw.side_effect = RawStoreError("connection refused")
+        source = CarbonIntensitySource(db=mock_db)
         df = source.generate_mock_data(hours=4)
 
         with pytest.raises(IngestionError, match="Failed to save data"):

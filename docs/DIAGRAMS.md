@@ -4,7 +4,7 @@ Reference diagrams for `energy-data-pipeline`. These render natively on GitHub (
 
 ## System context (C4 level 1)
 
-The zoomed-out view before the detail: what's inside the system boundary versus what's external to it. One actor (a developer or a CI job, running the same CLI either way), three external data sources, two local sinks - a relational store for trusted data and a document store for raw payloads.
+The zoomed-out view before the detail: what's inside the system boundary versus what's external to it. One actor (a developer or a CI job, running the same CLI either way), three external data sources, one local sink - a single relational store for both trusted, validated data and raw payloads (via a JSONB column for the latter).
 
 ```mermaid
 C4Context
@@ -18,27 +18,25 @@ C4Context
     System_Ext(carbon, "UK Carbon Intensity API", "GB generation mix + carbon intensity. Official (National Grid ESO), fully public, no auth")
     System_Ext(meteo, "Open-Meteo", "Weather data (temperature, wind, solar radiation). Fully public, no auth")
 
-    SystemDb(pg, "Postgres", "Validated/transformed data - generation_fact, generation_summary, pipeline_runs")
-    SystemDb(mongo, "MongoDB", "Raw ingested payloads, as received - raw_ingestions collection")
+    SystemDb(pg, "Postgres", "Validated/transformed data (generation_fact, generation_summary), raw ingested payloads (raw_ingestions), pipeline_runs")
 
     Rel(dev, pipeline, "Runs", "CLI, --mock or live")
     Rel(pipeline, entsoe, "Fetches generation data", "HTTPS + token")
     Rel(pipeline, carbon, "Fetches generation mix", "HTTPS")
     Rel(pipeline, meteo, "Fetches weather data", "HTTPS")
     Rel(pipeline, pg, "Reads / writes", "psycopg2")
-    Rel(pipeline, mongo, "Writes", "pymongo")
 ```
 
 ## Class hierarchy
 
-Every source subclasses `BaseSource`, which is what lets `Orchestrator` treat `EntsoeSource`, `WeatherSource`, and `CarbonIntensitySource` interchangeably for the parts of the pipeline that don't care which one it is - `save()`/`ingest()` and the single `IngestionError` type. `Orchestrator`'s other three dependencies (`PostgresDatabase`, `GenerationValidator`, `GenerationTransformer`) are constructor-injected rather than module-level globals, which is what lets tests substitute fakes/mocks instead of monkeypatching module functions.
+Every source subclasses `BaseSource`, which is what lets `Orchestrator` treat `EntsoeSource`, `WeatherSource`, and `CarbonIntensitySource` interchangeably for the parts of the pipeline that don't care which one it is - `save()`/`ingest()` and the single `IngestionError` type. `Orchestrator`'s other dependencies (`PostgresDatabase`, `GenerationValidator`, `GenerationTransformer`) are constructor-injected rather than module-level globals, which is what lets tests substitute fakes/mocks instead of monkeypatching module functions.
 
 ```mermaid
 classDiagram
     class BaseSource {
         <<abstract>>
         +source_name: str
-        +raw_store: RawStore
+        +db: PostgresDatabase
         +fetch(hours_back)* DataFrame
         +generate_mock_data(hours)* DataFrame
         +save(df) str
@@ -71,7 +69,7 @@ classDiagram
 
 ## System architecture
 
-Three independently-authenticated sources, coordinated by `orchestrate.py`. Every source's raw payload goes to MongoDB via the shared `raw_store.py` first - that's the "bronze" layer, schema-flexible on purpose. Only ENTSO-E has the `fuel_type`/`is_renewable` shape that `validate.py`/`transform_energy.py` are built around, so it's the only source that additionally earns the validate → transform → load path into Postgres's `generation_fact`/`generation_summary` - the "silver" layer.
+Three independently-authenticated sources, coordinated by `orchestrate.py`. Every source's raw payload goes to Postgres's `raw_ingestions` table via `PostgresDatabase.save_raw()` first - that's the "bronze" layer, schema-flexible on purpose via a JSONB column. Only ENTSO-E has the `fuel_type`/`is_renewable` shape that `validate.py`/`transform_energy.py` are built around, so it's the only source that additionally earns the validate → transform → load path into `generation_fact`/`generation_summary` - the "silver" layer. Bronze and silver are just tables in the same database now, not separate engines.
 
 ```mermaid
 flowchart TD
@@ -91,18 +89,18 @@ flowchart TD
     CARBON --> I_CARBON
     METEO --> I_WEATHER
 
-    I_ENTSOE --> RAWSTORE["RawStore.save_raw()"]
-    I_CARBON --> RAWSTORE
-    I_WEATHER --> RAWSTORE
-    RAWSTORE --> MONGO[("MongoDB<br/>raw_ingestions")]
+    I_ENTSOE --> RAWSAVE["PostgresDatabase<br/>.save_raw()"]
+    I_CARBON --> RAWSAVE
+    I_WEATHER --> RAWSAVE
+    RAWSAVE --> PG[("Postgres<br/>raw_ingestions, generation_fact,<br/>generation_summary")]
 
     I_ENTSOE --> VALIDATE["GenerationValidator<br/>.validate()"]
     VALIDATE --> TRANSFORM["GenerationTransformer<br/>melt, flag renewables,<br/>compute carbon intensity"]
     TRANSFORM --> LOAD["PostgresDatabase<br/>.load_generation_fact()<br/>.load_generation_summary()"]
 
-    LOAD --> PG[("Postgres<br/>generation_fact, generation_summary")]
+    LOAD --> PG
     LOAD --> RUNLOG["PostgresDatabase<br/>.log_pipeline_run()"]
-    RAWSTORE -.after save.-> RUNLOG
+    RAWSAVE -.after save.-> RUNLOG
     RUNLOG --> PG
 
     ORCH["Orchestrator"]:::orch -.controls.-> I_ENTSOE
@@ -117,7 +115,7 @@ flowchart TD
 
 ## Data flow (swimlanes by source)
 
-Each source is its own lane through `Orchestrator`. ENTSO-E earns its way into Postgres's `generation_fact`/`generation_summary` through validate → transform → load, and can fail at the validate step; the GB carbon-intensity source and weather have no `fuel_type`/MW generation shape to validate or transform against, so their lanes are shorter by design, not by omission - straight to MongoDB. All three converge on the same `PostgresDatabase.log_pipeline_run()` call regardless of which raw store they used, so every run - success or failure, any source - lands in one queryable Postgres table.
+Each source is its own lane through `Orchestrator`. ENTSO-E earns its way into Postgres's `generation_fact`/`generation_summary` through validate → transform → load, and can fail at the validate step; the GB carbon-intensity source and weather have no `fuel_type`/MW generation shape to validate or transform against, so their lanes are shorter by design, not by omission - straight to `raw_ingestions`. All three converge on the same `PostgresDatabase.log_pipeline_run()` call, so every run - success or failure, any source - lands in one queryable table.
 
 ```mermaid
 flowchart TB
@@ -131,17 +129,17 @@ flowchart TB
 
     subgraph L2["CarbonIntensitySource lane (GB)"]
         direction LR
-        B1["source.fetch()<br/>(live or --mock)"] --> B2["source.save()<br/>to MongoDB"]
+        B1["source.fetch()<br/>(live or --mock)"] --> B2["source.save()<br/>to raw_ingestions"]
     end
 
     subgraph L3["WeatherSource lane"]
         direction LR
-        C1["source.fetch()<br/>(live or --mock)"] --> C2["source.save()<br/>to MongoDB"]
+        C1["source.fetch()<br/>(live or --mock)"] --> C2["source.save()<br/>to raw_ingestions"]
     end
 
     A4 --> PG[("Postgres")]
-    B2 --> MONGO[("MongoDB")]
-    C2 --> MONGO
+    B2 --> PG
+    C2 --> PG
 
     A4 --> LOG["PostgresDatabase<br/>.log_pipeline_run(source, status)"]
     A5 --> LOG
@@ -190,9 +188,9 @@ sequenceDiagram
 
 ## Database schema
 
-### Postgres (trusted / validated data)
+### Postgres
 
-Created and upserted by `PostgresDatabase`, via `INSERT ... ON CONFLICT DO UPDATE`. Fact and summary rows aren't linked by a foreign key — they're correlated by `(timestamp, country_code)`, which is also the natural join key for a future weather-vs-generation analysis (Stage 6).
+All four tables are created and owned by `PostgresDatabase`. `generation_fact`/`generation_summary` are upserted via `INSERT ... ON CONFLICT DO UPDATE`; fact and summary rows aren't linked by a foreign key — they're correlated by `(timestamp, country_code)`, which is also the natural join key for a future weather-vs-generation analysis (Stage 6). `raw_ingestions` is the bronze layer — no fixed schema on `payload`, since it's whatever shape the source's DataFrame produced (a `JSONB` column, not a set of typed columns), which is exactly the point: a new source, or a source's API changing shape, needs no migration here. It has no `UNIQUE` constraint (unlike the other three) since every ingest run appends a new row rather than upserting.
 
 ```mermaid
 erDiagram
@@ -223,19 +221,24 @@ erDiagram
         text status
         text message
     }
+    raw_ingestions {
+        serial id PK
+        text source
+        timestamptz ingested_at
+        text format
+        jsonb payload
+    }
 
     generation_fact }o..o{ generation_summary : "same timestamp + country_code"
 ```
 
-### MongoDB (raw / bronze layer)
-
-One `raw_ingestions` collection, shared by all three sources - `RawStore` is the only class that writes to it. No fixed schema: `payload` is whatever shape the source's DataFrame produced, which is exactly the point - a new source, or a source's API changing shape, needs no migration here.
+Example `raw_ingestions` row (`payload` shown expanded; it's stored as a single JSONB value):
 
 ```json
 {
-  "_id": ObjectId("..."),
+  "id": 42,
   "source": "weather",
-  "ingested_at": ISODate("2026-08-06T11:55:36.999Z"),
+  "ingested_at": "2026-08-06T11:55:36.999+00:00",
   "format": "records",
   "payload": [
     { "index": "2026-08-06T10:00:00+01:00", "temperature_2m": 15.6, "wind_speed_10m": 8.6, "location": "Dublin" },
@@ -246,7 +249,7 @@ One `raw_ingestions` collection, shared by all three sources - `RawStore` is the
 
 ## CI/CD pipeline
 
-From `.github/workflows/ci.yml`. Every push and PR gets linted and tested across both Python versions; only branches actually headed to production get packaged. Postgres and MongoDB run as GitHub Actions **service containers** - ephemeral, one per job run, on the runner's default ports (no local-port-collision workaround needed there, unlike `docker-compose.yml`).
+From `.github/workflows/ci.yml`. Every push and PR gets linted and tested across both Python versions; only branches actually headed to production get packaged. Postgres runs as a GitHub Actions **service container** - ephemeral, one per job run, on the runner's default port (no local-port-collision workaround needed there, unlike `docker-compose.yml`).
 
 ```mermaid
 flowchart TD
@@ -254,7 +257,7 @@ flowchart TD
 
     subgraph matrix["Lint and Test — matrix: Python 3.10, 3.11"]
         direction LR
-        SVC["Start service containers<br/>postgres:16-alpine, mongo:7<br/>(health-checked before job proceeds)"] --> M1["Checkout"] --> M2["Set up Python"] --> M3["pip install -r requirements.txt<br/>pip install pytest ruff"] --> M4["ruff check src tests"] --> M5["pytest tests/ -v<br/>(hits the service containers)"]
+        SVC["Start service container<br/>postgres:16-alpine<br/>(health-checked before job proceeds)"] --> M1["Checkout"] --> M2["Set up Python"] --> M3["pip install -r requirements.txt<br/>pip install pytest ruff"] --> M4["ruff check src tests"] --> M5["pytest tests/ -v<br/>(hits the service container)"]
     end
 
     M5 --> GATE{"branch is<br/>main / release/* / hotfix/*?"}

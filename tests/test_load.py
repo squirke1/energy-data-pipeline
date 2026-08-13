@@ -24,7 +24,8 @@ def clean_db(db):
     db.init_db()
     with db.connection() as conn, conn.cursor() as cur:
         cur.execute(
-            "TRUNCATE generation_fact, generation_summary, pipeline_runs RESTART IDENTITY CASCADE"
+            "TRUNCATE generation_fact, generation_summary, pipeline_runs, raw_ingestions "
+            "RESTART IDENTITY CASCADE"
         )
 
 
@@ -69,12 +70,22 @@ def _table_names(db) -> set:
 
 class TestInitDb:
     def test_creates_all_tables(self, db):
-        assert {"generation_fact", "generation_summary", "pipeline_runs"} <= _table_names(db)
+        assert {
+            "generation_fact",
+            "generation_summary",
+            "pipeline_runs",
+            "raw_ingestions",
+        } <= _table_names(db)
 
     def test_idempotent(self, db):
         db.init_db()
         db.init_db()
-        assert {"generation_fact", "generation_summary", "pipeline_runs"} <= _table_names(db)
+        assert {
+            "generation_fact",
+            "generation_summary",
+            "pipeline_runs",
+            "raw_ingestions",
+        } <= _table_names(db)
 
 
 class TestLoadGenerationFact:
@@ -205,3 +216,56 @@ class TestQueryGenerationFact:
         result = db.query_generation_fact("IE")
         assert isinstance(result, pd.DataFrame)
         assert len(result) == 3
+
+
+class TestSaveRaw:
+    def test_saves_dataframe(self, db):
+        df = pd.DataFrame({"a": [1, 2], "b": [3, 4]})
+        raw_id = db.save_raw("test_source", df)
+        assert isinstance(raw_id, str)
+        assert raw_id.isdigit()
+
+    def test_saves_dict(self, db):
+        raw_id = db.save_raw("test_source", {"foo": "bar"})
+        assert isinstance(raw_id, str)
+
+    def test_document_has_expected_fields(self, db):
+        df = pd.DataFrame({"a": [1, 2]})
+        db.save_raw("test_source", df)
+        doc = db.get_recent_raw("test_source", limit=1)[0]
+        assert doc["source"] == "test_source"
+        assert "ingested_at" in doc
+        assert doc["payload"] == [{"index": 0, "a": 1}, {"index": 1, "a": 2}]
+
+    def test_dataframe_columns_become_payload_fields(self, db):
+        df = pd.DataFrame({"temperature_2m": [5.1], "location": ["Dublin"]})
+        db.save_raw("weather", df)
+        doc = db.get_recent_raw("weather", limit=1)[0]
+        assert doc["payload"][0]["temperature_2m"] == 5.1
+        assert doc["payload"][0]["location"] == "Dublin"
+
+
+class TestGetRecentRaw:
+    def test_returns_matching_source_only(self, db):
+        db.save_raw("entsoe", {"a": 1})
+        db.save_raw("weather", {"b": 2})
+        results = db.get_recent_raw("weather")
+        assert len(results) == 1
+        assert results[0]["source"] == "weather"
+
+    def test_orders_most_recent_first(self, db):
+        db.save_raw("weather", {"seq": 1})
+        db.save_raw("weather", {"seq": 2})
+        results = db.get_recent_raw("weather")
+        assert results[0]["payload"]["seq"] == 2
+        assert results[1]["payload"]["seq"] == 1
+
+    def test_limit_respected(self, db):
+        for i in range(5):
+            db.save_raw("weather", {"seq": i})
+        results = db.get_recent_raw("weather", limit=2)
+        assert len(results) == 2
+
+    def test_empty_for_unknown_source(self, db):
+        results = db.get_recent_raw("nonexistent_source")
+        assert results == []
