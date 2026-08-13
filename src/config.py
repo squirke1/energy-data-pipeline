@@ -7,27 +7,18 @@ PROCESSED_DATA_DIR = DATA_DIR / "processed"
 
 PROCESSED_DATA_DIR.mkdir(parents=True, exist_ok=True)
 
-# Postgres - validated/transformed data (generation_fact, generation_summary,
-# pipeline_runs). Connection defaults match docker-compose.yml. Host port
-# defaults to 5433 (not 5432) - a native/other local Postgres on 5432 is
-# common and shouldn't collide with this project's container.
+# Postgres - all persisted data: validated/transformed generation_fact /
+# generation_summary, raw ingested payloads as received from each source
+# (raw_ingestions, via a JSONB column so each source's shape can vary and
+# change without a migration), and the pipeline_runs audit log. Connection
+# defaults match docker-compose.yml. Host port defaults to 5433 (not 5432) -
+# a native/other local Postgres on 5432 is common and shouldn't collide
+# with this project's container.
 POSTGRES_HOST = os.getenv("POSTGRES_HOST", "localhost")
 POSTGRES_PORT = int(os.getenv("POSTGRES_PORT", "5433"))
 POSTGRES_DB = os.getenv("POSTGRES_DB", "energy_pipeline")
 POSTGRES_USER = os.getenv("POSTGRES_USER", "pipeline")
 POSTGRES_PASSWORD = os.getenv("POSTGRES_PASSWORD", "pipeline")
-
-# MongoDB - raw ingested payloads, as received from each source, before
-# validation/transformation. Schema-flexible on purpose: each source's
-# JSON shape is different and can change without a migration. Host port
-# defaults to 27018 (not 27017) for the same local-collision reason as
-# Postgres above.
-MONGO_HOST = os.getenv("MONGO_HOST", "localhost")
-MONGO_PORT = int(os.getenv("MONGO_PORT", "27018"))
-MONGO_DB = os.getenv("MONGO_DB", "energy_pipeline")
-MONGO_USER = os.getenv("MONGO_USER", "pipeline")
-MONGO_PASSWORD = os.getenv("MONGO_PASSWORD", "pipeline")
-MONGO_RAW_COLLECTION = "raw_ingestions"
 
 # ENTSO-E API Configuration
 # Get API key from: https://transparency.entsoe.eu/content/static_content/Static%20content/web%20api/Guide.html

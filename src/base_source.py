@@ -4,9 +4,9 @@ from abc import ABC, abstractmethod
 import pandas as pd
 
 try:
-    from src.raw_store import RawStore, RawStoreError
+    from src.load_db import PostgresDatabase, RawStoreError
 except ImportError:
-    from raw_store import RawStore, RawStoreError
+    from load_db import PostgresDatabase, RawStoreError
 
 logger = logging.getLogger(__name__)
 
@@ -23,8 +23,8 @@ class IngestionError(Exception):
 class BaseSource(ABC):
     source_name: str
 
-    def __init__(self, raw_store: RawStore | None = None):
-        self.raw_store = raw_store or RawStore()
+    def __init__(self, db: PostgresDatabase | None = None):
+        self.db = db or PostgresDatabase()
 
     @abstractmethod
     def fetch(self, hours_back: int = 24) -> pd.DataFrame:
@@ -36,7 +36,7 @@ class BaseSource(ABC):
 
     def save(self, df: pd.DataFrame) -> str:
         try:
-            raw_id = self.raw_store.save_raw(self.source_name, df)
+            raw_id = self.db.save_raw(self.source_name, df)
             logger.info(f"Saved to raw store: {raw_id}")
             return raw_id
         except RawStoreError as e:

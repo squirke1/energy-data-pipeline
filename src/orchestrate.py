@@ -109,8 +109,8 @@ class Orchestrator:
 
         They're independent I/O-bound calls (HTTP fetch + DB write) with no
         shared state between them, so threads - not processes - are the
-        right tool: requests/psycopg2/pymongo all release the GIL during
-        I/O waits, so three threads genuinely overlap their waiting time
+        right tool: requests/psycopg2 both release the GIL during I/O
+        waits, so three threads genuinely overlap their waiting time
         instead of contending for a CPU nothing here is bottlenecked on.
         Wall-clock time drops to roughly the slowest source instead of the
         sum of all three.

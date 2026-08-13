@@ -10,7 +10,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 
 from ingest_entsoe import EntsoeSource
 from src.base_source import IngestionError
-from src.raw_store import RawStoreError
+from src.load_db import RawStoreError
 
 
 @pytest.fixture
@@ -117,19 +117,19 @@ class TestFetch:
 
 class TestSave:
     def test_saves_to_raw_store(self, sample_df):
-        mock_raw_store = Mock()
-        mock_raw_store.save_raw.return_value = "abc123"
-        source = EntsoeSource(raw_store=mock_raw_store)
+        mock_db = Mock()
+        mock_db.save_raw.return_value = "abc123"
+        source = EntsoeSource(db=mock_db)
 
         raw_id = source.save(sample_df)
 
-        mock_raw_store.save_raw.assert_called_once_with("entsoe", sample_df)
+        mock_db.save_raw.assert_called_once_with("entsoe", sample_df)
         assert raw_id == "abc123"
 
     def test_raw_store_error_wrapped(self, sample_df):
-        mock_raw_store = Mock()
-        mock_raw_store.save_raw.side_effect = RawStoreError("connection refused")
-        source = EntsoeSource(raw_store=mock_raw_store)
+        mock_db = Mock()
+        mock_db.save_raw.side_effect = RawStoreError("connection refused")
+        source = EntsoeSource(db=mock_db)
 
         with pytest.raises(IngestionError, match="Failed to save data"):
             source.save(sample_df)
