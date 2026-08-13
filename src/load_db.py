@@ -1,11 +1,13 @@
+import json
 import logging
 from collections.abc import Generator
 from contextlib import contextmanager
+from typing import Any
 
 import pandas as pd
 import psycopg2
 import psycopg2.extensions
-from psycopg2.extras import execute_values
+from psycopg2.extras import Json, RealDictCursor, execute_values
 
 try:
     from src.config import (
@@ -32,6 +34,10 @@ except ImportError:
 
 logging.basicConfig(level=LOG_LEVEL, format=LOG_FORMAT, datefmt=LOG_DATE_FORMAT)
 logger = logging.getLogger(__name__)
+
+
+class RawStoreError(Exception):
+    pass
 
 
 class PostgresDatabase:
@@ -73,6 +79,24 @@ class PostgresDatabase:
     )
     """
 
+    _CREATE_RAW_INGESTIONS = """
+    CREATE TABLE IF NOT EXISTS raw_ingestions (
+        id          SERIAL PRIMARY KEY,
+        source      TEXT NOT NULL,
+        ingested_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+        format      TEXT NOT NULL,
+        payload     JSONB NOT NULL
+    )
+    """
+
+    # No UNIQUE constraint on raw_ingestions (unlike the other three tables)
+    # to create one implicitly, so get_recent_raw()'s
+    # WHERE source = %s ORDER BY id DESC needs this explicitly.
+    _CREATE_RAW_INGESTIONS_INDEX = """
+    CREATE INDEX IF NOT EXISTS idx_raw_ingestions_source_id
+        ON raw_ingestions (source, id DESC)
+    """
+
     def __init__(
         self,
         host: str = POSTGRES_HOST,
@@ -111,6 +135,8 @@ class PostgresDatabase:
             cur.execute(self._CREATE_GENERATION_FACT)
             cur.execute(self._CREATE_GENERATION_SUMMARY)
             cur.execute(self._CREATE_PIPELINE_RUNS)
+            cur.execute(self._CREATE_RAW_INGESTIONS)
+            cur.execute(self._CREATE_RAW_INGESTIONS_INDEX)
         logger.info("Database initialised")
 
     def load_generation_fact(self, df: pd.DataFrame) -> int:
@@ -240,3 +266,59 @@ class PostgresDatabase:
                 conn,
                 params=(country_code, limit),
             )
+
+    def save_raw(
+        self, source: str, data: pd.DataFrame | dict | list, format_hint: str = "records"
+    ) -> str:
+        """Store a raw ingested payload as-is. Returns the new row's id as a string.
+
+        DataFrames are stored via to_dict("records") - one JSONB field per
+        column, matching how each source's JSON naturally varies rather than
+        forcing a fixed schema across sources.
+        """
+        if isinstance(data, pd.DataFrame):
+            payload = data.reset_index().to_dict(orient="records")
+        else:
+            payload = data
+
+        try:
+            with self.connection() as conn, conn.cursor() as cur:
+                cur.execute(
+                    """
+                    INSERT INTO raw_ingestions (source, format, payload)
+                    VALUES (%s, %s, %s)
+                    RETURNING id
+                    """,
+                    (
+                        source,
+                        format_hint,
+                        # DataFrame indexes (e.g. pandas Timestamps) aren't
+                        # JSON-serializable by stdlib json, which Json() uses
+                        # by default - stringify anything it doesn't know
+                        # instead of failing the save.
+                        Json(payload, dumps=lambda obj: json.dumps(obj, default=str)),
+                    ),
+                )
+                raw_id = cur.fetchone()[0]
+            logger.info(f"Saved raw {source} row {raw_id}")
+            return str(raw_id)
+        except Exception as e:
+            logger.error(f"Failed to save raw {source} row: {e}")
+            raise RawStoreError(str(e)) from e
+
+    def get_recent_raw(self, source: str, limit: int = 10) -> list[dict[str, Any]]:
+        # Sort by id, not ingested_at: rapid successive inserts can tie on
+        # ingested_at. A SERIAL id is monotonically increasing and unique,
+        # so it sorts reliably.
+        with self.connection() as conn, conn.cursor(cursor_factory=RealDictCursor) as cur:
+            cur.execute(
+                """
+                SELECT id, source, ingested_at, format, payload
+                FROM raw_ingestions
+                WHERE source = %s
+                ORDER BY id DESC
+                LIMIT %s
+                """,
+                (source, limit),
+            )
+            return [dict(row) for row in cur.fetchall()]

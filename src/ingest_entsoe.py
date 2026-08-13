@@ -37,8 +37,8 @@ def _sanitize_fetch_error(e: Exception) -> str:
 class EntsoeSource(BaseSource):
     source_name = "entsoe"
 
-    def __init__(self, country_code: str = "IE", raw_store=None):
-        super().__init__(raw_store)
+    def __init__(self, country_code: str = "IE", db=None):
+        super().__init__(db)
         self.country_code = country_code
 
     def get_client(self) -> EntsoePandasClient:
