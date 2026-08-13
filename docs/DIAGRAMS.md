@@ -266,6 +266,8 @@ flowchart TD
     PKG --> UPLOAD["Upload artifact<br/>(GitHub Actions artifact store)"]
 ```
 
+A second, independent workflow, `.github/workflows/scheduled-run.yml`, is what actually runs the pipeline in production - `ci.yml` above only lints, tests, and packages. It fires on a cron schedule (or a manual `workflow_dispatch`) and runs `python src/orchestrate.py` live against a managed Postgres, authenticated via repo secrets rather than the service-container credentials `ci.yml` uses. See the README's "Production Deployment" section for setup.
+
 ## Branching model (GitFlow)
 
 ```mermaid

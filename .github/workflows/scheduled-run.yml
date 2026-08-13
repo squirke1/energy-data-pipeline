@@ -1,0 +1,42 @@
+name: Scheduled Pipeline Run
+
+on:
+  schedule:
+    # Every 6 hours. Generation/weather data updates roughly hourly, but the
+    # upsert on generation_fact/generation_summary means overlapping windows
+    # are harmless, and raw_ingestions is meant to accumulate a history of
+    # snapshots over time rather than dedupe them.
+    - cron: "0 */6 * * *"
+  workflow_dispatch: # allow a manual run from the Actions tab
+
+permissions:
+  contents: read
+
+jobs:
+  run-pipeline:
+    name: Run pipeline (live)
+    runs-on: ubuntu-latest
+    env:
+      ENTSOE_API_KEY: ${{ secrets.ENTSOE_API_KEY }}
+      POSTGRES_HOST: ${{ secrets.POSTGRES_HOST }}
+      POSTGRES_PORT: ${{ secrets.POSTGRES_PORT }}
+      POSTGRES_DB: ${{ secrets.POSTGRES_DB }}
+      POSTGRES_USER: ${{ secrets.POSTGRES_USER }}
+      POSTGRES_PASSWORD: ${{ secrets.POSTGRES_PASSWORD }}
+      # The managed Postgres this points at is reachable over the internet,
+      # unlike docker-compose.yml's local, SSL-less container - require TLS.
+      POSTGRES_SSLMODE: require
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Run pipeline
+        run: python src/orchestrate.py
