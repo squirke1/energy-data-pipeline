@@ -153,10 +153,19 @@ class Orchestrator:
 
 DISPLAY_LABELS = {"entsoe": "ENTSOE", "carbon_intensity": "Carbon intensity", "weather": "Weather"}
 
-if __name__ == "__main__":
-    use_mock = "--mock" in sys.argv
+
+def main(argv: list[str]) -> int:
+    """Returns a process exit code rather than calling sys.exit() directly,
+    so this is callable/testable without subprocess. run_all() catches each
+    source's exceptions internally and reports them in its returned dict
+    instead of raising - without checking that dict here, a routine source
+    failure (an API outage, a validation error) would print "failed" but
+    still exit 0, which would make the scheduled workflow's failure-based
+    alerting silently never fire for anything but a total crash.
+    """
+    use_mock = "--mock" in argv
     selected_source = "all"
-    for arg in sys.argv[1:]:
+    for arg in argv:
         if arg in ("entsoe", "carbon_intensity", "weather", "all"):
             selected_source = arg
 
@@ -164,11 +173,20 @@ if __name__ == "__main__":
 
     if selected_source == "all":
         # run_all() runs all three sources concurrently (see its docstring)
-        for source_name, run_summary in orchestrator.run_all(mock=use_mock).items():
+        run_summaries = orchestrator.run_all(mock=use_mock)
+        for source_name, run_summary in run_summaries.items():
             print(f"{DISPLAY_LABELS[source_name]}: {run_summary}")
-    else:
-        run_method = getattr(orchestrator, f"run_{selected_source}")
-        try:
-            print(f"{DISPLAY_LABELS[selected_source]}: {run_method(mock=use_mock)}")
-        except Exception as e:  # noqa: BLE001 - top-level CLI catch-all
-            print(f"{DISPLAY_LABELS[selected_source]} failed: {e}")
+        any_failed = any(summary["status"] == "failed" for summary in run_summaries.values())
+        return 1 if any_failed else 0
+
+    run_method = getattr(orchestrator, f"run_{selected_source}")
+    try:
+        print(f"{DISPLAY_LABELS[selected_source]}: {run_method(mock=use_mock)}")
+        return 0
+    except Exception as e:  # noqa: BLE001 - top-level CLI catch-all
+        print(f"{DISPLAY_LABELS[selected_source]} failed: {e}")
+        return 1
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv[1:]))
