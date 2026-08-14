@@ -1,13 +1,13 @@
 import sys
 import time
 from pathlib import Path
-from unittest.mock import Mock
+from unittest.mock import Mock, patch
 
 import pytest
 
 sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 
-from orchestrate import Orchestrator
+from orchestrate import Orchestrator, main
 
 
 @pytest.fixture
@@ -86,3 +86,49 @@ class TestRunAll:
         # close to 1x. A 2x threshold clearly distinguishes the two without
         # being flaky on a loaded CI runner.
         assert elapsed < sleep_seconds * 2
+
+
+class TestMain:
+    @patch("orchestrate.Orchestrator")
+    def test_all_sources_succeed_returns_zero(self, mock_orchestrator_cls):
+        mock_orchestrator_cls.return_value.run_all.return_value = {
+            "entsoe": {"status": "success"},
+            "carbon_intensity": {"status": "success"},
+            "weather": {"status": "success"},
+        }
+
+        exit_code = main(["--mock"])
+
+        assert exit_code == 0
+
+    @patch("orchestrate.Orchestrator")
+    def test_one_source_failing_returns_nonzero(self, mock_orchestrator_cls):
+        # This is the exact gap that would make failure-based alerting on
+        # the scheduled workflow silently never fire: run_all() catches
+        # each source's exceptions and reports "failed" in its dict instead
+        # of raising, so main() has to check that dict itself.
+        mock_orchestrator_cls.return_value.run_all.return_value = {
+            "entsoe": {"status": "failed", "error": "API down"},
+            "carbon_intensity": {"status": "success"},
+            "weather": {"status": "success"},
+        }
+
+        exit_code = main(["--mock"])
+
+        assert exit_code == 1
+
+    @patch("orchestrate.Orchestrator")
+    def test_single_source_success_returns_zero(self, mock_orchestrator_cls):
+        mock_orchestrator_cls.return_value.run_entsoe.return_value = {"status": "success"}
+
+        exit_code = main(["--mock", "entsoe"])
+
+        assert exit_code == 0
+
+    @patch("orchestrate.Orchestrator")
+    def test_single_source_failure_returns_nonzero(self, mock_orchestrator_cls):
+        mock_orchestrator_cls.return_value.run_entsoe.side_effect = ValueError("validation failed")
+
+        exit_code = main(["--mock", "entsoe"])
+
+        assert exit_code == 1
