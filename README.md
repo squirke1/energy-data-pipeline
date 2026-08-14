@@ -167,7 +167,8 @@ Beyond local development, the pipeline runs unattended on a schedule via a secon
 ### One-time setup
 
 1. **Create a free Neon project** at [neon.tech](https://neon.tech) and grab its connection details (host, database name, user, password) from the project dashboard.
-2. **Add them as GitHub Actions secrets** on this repo (Settings → Secrets and variables → Actions), or via the CLI - each of these prompts for the value on stdin, so nothing sensitive needs to be pasted into a chat, a PR, or committed to the repo:
+2. **Create a Slack incoming webhook** (a Slack app with "Incoming Webhooks" enabled, pointed at whichever channel you want failure alerts in) and copy its URL.
+3. **Add them all as GitHub Actions secrets** on this repo (Settings → Secrets and variables → Actions), or via the CLI - each of these prompts for the value on stdin, so nothing sensitive needs to be pasted into a chat, a PR, or committed to the repo:
    ```bash
    gh secret set ENTSOE_API_KEY
    gh secret set POSTGRES_HOST
@@ -175,10 +176,11 @@ Beyond local development, the pipeline runs unattended on a schedule via a secon
    gh secret set POSTGRES_DB
    gh secret set POSTGRES_USER
    gh secret set POSTGRES_PASSWORD
+   gh secret set SLACK_WEBHOOK_URL
    ```
-3. The workflow runs every 6 hours (`workflow_dispatch` also allows a manual run from the Actions tab) and connects with `POSTGRES_SSLMODE=require`, since Neon is reachable over the internet - unlike the local dev Postgres, which has no SSL configured and isn't reachable outside your machine.
+4. The workflow runs every 6 hours (`workflow_dispatch` also allows a manual run from the Actions tab) and connects with `POSTGRES_SSLMODE=require`, since Neon is reachable over the internet - unlike the local dev Postgres, which has no SSL configured and isn't reachable outside your machine.
 
-Retries (`src/retry.py`) mean a transient failure from any of the three upstream APIs doesn't fail the whole scheduled run - only a persistent one does, visible as a failed run in the Actions tab (and recorded in `pipeline_runs` either way).
+Retries (`src/retry.py`) mean a transient failure from any of the three upstream APIs doesn't fail the whole scheduled run - only a persistent one does. `orchestrate.py`'s CLI turns that into a real non-zero exit code (a `run_all()` catching each source's exceptions internally, to isolate one source's failure from the others, previously meant the process always exited 0 - fixed alongside this feature, since it would have made failure alerting silently never fire), which is what triggers a Slack message with a link to the failed run, on top of the failure always being recorded in `pipeline_runs` either way.
 
 ## Development
 

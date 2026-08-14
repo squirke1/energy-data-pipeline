@@ -40,3 +40,18 @@ jobs:
 
       - name: Run pipeline
         run: python src/orchestrate.py
+
+      - name: Notify Slack on failure
+        # orchestrate.py's main() only exits non-zero when a source
+        # genuinely failed (an exhausted-retries API outage, a validation
+        # error) or the process crashed outright - not on every log line,
+        # so this only fires on a real failure worth waking up for.
+        if: failure()
+        env:
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          curl -sf -X POST -H 'Content-type: application/json' \
+            -d "$(jq -n --arg url "$RUN_URL" \
+              '{text: (":rotating_light: energy-data-pipeline scheduled run failed - " + $url)}')" \
+            "$SLACK_WEBHOOK_URL"
