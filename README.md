@@ -17,11 +17,12 @@ energy-data-pipeline/
 │   ├── transform_energy.py          # GenerationTransformer
 │   ├── validate.py                  # GenerationValidator
 │   ├── load_db.py                   # PostgresDatabase - generation_fact/summary, raw_ingestions, pipeline_runs
+│   ├── retry.py                     # retry_with_backoff decorator + is_retryable_request_error
 │   └── orchestrate.py               # Orchestrator - ties every source together
 ├── data/
-│   └── processed/             # Transformed output (reserved; not yet written to)
+│   └── processed/             # Gold-layer output written by notebooks/02_transformations.ipynb
 ├── tests/                     # Unit tests
-├── notebooks/                 # Jupyter notebooks for analysis
+├── notebooks/                 # Stage 6 analysis notebooks (weather vs. renewable generation)
 ├── docker-compose.yml         # Local Postgres
 └── .github/workflows/         # CI/CD pipelines
 ```
