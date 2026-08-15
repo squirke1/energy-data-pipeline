@@ -218,13 +218,28 @@ Edit `src/config.py` to customize:
 - Logging levels
 - Request timeouts and retry settings
 
+## Analysis Notebooks (Stage 6)
+
+`notebooks/` correlates Dublin weather against Ireland's renewable generation share, run in order:
+
+1. `01_explore_source_data.ipynb` - look at what's actually in `generation_summary` and the raw weather snapshots before transforming anything
+2. `02_transformations.ipynb` - flatten and dedupe the weather snapshots, resample generation to hourly, join the two, and write the result to `data/processed/weather_generation_merged.csv` (the "gold" layer, one step past `raw_ingestions`' bronze and `generation_summary`'s silver)
+3. `03_visualization.ipynb` - the actual correlation: wind speed vs. renewable share, plotted as a scatter with a fitted trend line and the correlation coefficient, plus the same relationship over time as two stacked panels (deliberately not a dual-axis chart - see the notebook for why)
+
+Requires the notebook extras (`pip install -r requirements.txt` already includes them) and a Jupyter kernel pointed at `.venv`:
+```bash
+python -m ipykernel install --user --name energy-pipeline-venv
+```
+
+These read from whichever Postgres your environment is pointed at - local `docker-compose` by default, or production if you export the Neon env vars first. The correlation is naturally weak on a freshly-started pipeline (few data points) and sharpens as more scheduled runs accumulate history - re-run `02` then `03` any time to refresh against the latest data, no code changes needed.
+
 ## Next Steps
 
 - [x] Stage 2: Data Transformation
 - [x] Stage 3: Data Validation
 - [x] Stage 4: Database Loading
 - [x] Stage 5: Pipeline Orchestration
-- [ ] Stage 6: Analysis Notebooks (correlate weather with renewable generation)
+- [x] Stage 6: Analysis Notebooks (correlate weather with renewable generation)
 
 ## License
 

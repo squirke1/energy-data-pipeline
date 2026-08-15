@@ -11,3 +11,7 @@ ruff==0.16.1
 
 # Optional: for enhanced data handling
 python-dateutil>=2.8.0
+
+# Optional: Stage 6 analysis notebooks (notebooks/)
+matplotlib>=3.8.0
+ipykernel>=6.29.0
