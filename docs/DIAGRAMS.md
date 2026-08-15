@@ -69,7 +69,7 @@ classDiagram
 
 ## System architecture
 
-Three independently-authenticated sources, coordinated by `orchestrate.py`. Every source's raw payload goes to Postgres's `raw_ingestions` table via `PostgresDatabase.save_raw()` first - that's the "bronze" layer, schema-flexible on purpose via a JSONB column. Only ENTSO-E has the `fuel_type`/`is_renewable` shape that `validate.py`/`transform_energy.py` are built around, so it's the only source that additionally earns the validate → transform → load path into `generation_fact`/`generation_summary` - the "silver" layer. Bronze and silver are just tables in the same database now, not separate engines.
+Three independently-authenticated sources, coordinated by `orchestrate.py`. Each source's actual network call (not the surrounding parsing/error-translation logic) is wrapped by `retry_with_backoff` (`src/retry.py`), which retries only transient failures - connection errors, timeouts, 429, 5xx - with exponential backoff, and lets 4xx/business-logic errors through immediately, since retrying those just repeats a failure that won't change. Every source's raw payload then goes to Postgres's `raw_ingestions` table via `PostgresDatabase.save_raw()` - that's the "bronze" layer, schema-flexible on purpose via a JSONB column. Only ENTSO-E has the `fuel_type`/`is_renewable` shape that `validate.py`/`transform_energy.py` are built around, so it's the only source that additionally earns the validate → transform → load path into `generation_fact`/`generation_summary` - the "silver" layer. Bronze and silver are just tables in the same database now, not separate engines.
 
 ```mermaid
 flowchart TD
@@ -190,7 +190,7 @@ sequenceDiagram
 
 ### Postgres
 
-All four tables are created and owned by `PostgresDatabase`. `generation_fact`/`generation_summary` are upserted via `INSERT ... ON CONFLICT DO UPDATE`; fact and summary rows aren't linked by a foreign key — they're correlated by `(timestamp, country_code)`, which is also the natural join key for a future weather-vs-generation analysis (Stage 6). `raw_ingestions` is the bronze layer — no fixed schema on `payload`, since it's whatever shape the source's DataFrame produced (a `JSONB` column, not a set of typed columns), which is exactly the point: a new source, or a source's API changing shape, needs no migration here. It has no `UNIQUE` constraint (unlike the other three) since every ingest run appends a new row rather than upserting.
+All four tables are created and owned by `PostgresDatabase`. `generation_fact`/`generation_summary` are upserted via `INSERT ... ON CONFLICT DO UPDATE`; fact and summary rows aren't linked by a foreign key — they're correlated by `(timestamp, country_code)`, which is also the join key `notebooks/02_transformations.ipynb` uses for the weather-vs-generation analysis (Stage 6, see below). `raw_ingestions` is the bronze layer — no fixed schema on `payload`, since it's whatever shape the source's DataFrame produced (a `JSONB` column, not a set of typed columns), which is exactly the point: a new source, or a source's API changing shape, needs no migration here. It has no `UNIQUE` constraint (unlike the other three) since every ingest run appends a new row rather than upserting.
 
 ```mermaid
 erDiagram
@@ -266,7 +266,26 @@ flowchart TD
     PKG --> UPLOAD["Upload artifact<br/>(GitHub Actions artifact store)"]
 ```
 
-A second, independent workflow, `.github/workflows/scheduled-run.yml`, is what actually runs the pipeline in production - `ci.yml` above only lints, tests, and packages. It fires on a cron schedule (or a manual `workflow_dispatch`) and runs `python src/orchestrate.py` live against a managed Postgres, authenticated via repo secrets rather than the service-container credentials `ci.yml` uses. See the README's "Production Deployment" section for setup.
+A second, independent workflow, `.github/workflows/scheduled-run.yml`, is what actually runs the pipeline in production - `ci.yml` above only lints, tests, and packages. It fires on a cron schedule (or a manual `workflow_dispatch`) and runs `python src/orchestrate.py` live against a managed Postgres, authenticated via repo secrets rather than the service-container credentials `ci.yml` uses. `orchestrate.py`'s `main()` returns a real non-zero exit code whenever any source's status is `"failed"` (not just on a total crash - `Orchestrator.run_all()` catches each source's exceptions internally, so without that check a routine failure would print "failed" and still exit 0), which is what lets the workflow's `if: failure()` step post a Slack message with a link to the failed run. See the README's "Production Deployment" section for setup.
+
+## Analysis pipeline (Stage 6)
+
+`notebooks/`, run in order, turns the raw/trusted tables above into an answer to the project's original question - does weather predict Ireland's renewable generation share:
+
+```mermaid
+flowchart LR
+    PG[("Postgres<br/>generation_summary, raw_ingestions")] --> N1["01_explore_source_data.ipynb<br/>look before transforming"]
+    N1 -.-> N2
+    PG --> N2["02_transformations.ipynb<br/>dedupe + resample + join"]
+    N2 --> GOLD[("data/processed/<br/>weather_generation_merged.csv")]
+    GOLD --> N3["03_visualization.ipynb<br/>correlation + charts"]
+    GOLD --> N4["04_predictive_model.ipynb<br/>regression vs. baseline"]
+
+    classDef gold fill:#eda100,color:#0b0b0b,stroke:#c98500
+    class GOLD gold
+```
+
+`02_transformations.ipynb` is what actually does the work: it flattens and dedupes weather's overlapping `raw_ingestions` snapshots (every scheduled run re-fetches a rolling window), resamples `generation_summary` to hourly, joins the two, and writes the result to `data/processed/` - the "gold" layer, one step past `raw_ingestions`' bronze and `generation_summary`'s silver, and the first thing this project ever wrote to that directory. `03` and `04` both read that same CSV rather than re-querying Postgres, so re-running either after `02` refreshes against however much history has accumulated since - no code changes needed as the scheduled workflow keeps adding data.
 
 ## Branching model (GitFlow)
 
