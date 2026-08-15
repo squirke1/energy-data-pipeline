@@ -224,7 +224,8 @@ Edit `src/config.py` to customize:
 
 1. `01_explore_source_data.ipynb` - look at what's actually in `generation_summary` and the raw weather snapshots before transforming anything
 2. `02_transformations.ipynb` - flatten and dedupe the weather snapshots, resample generation to hourly, join the two, and write the result to `data/processed/weather_generation_merged.csv` (the "gold" layer, one step past `raw_ingestions`' bronze and `generation_summary`'s silver)
-3. `03_visualization.ipynb` - the actual correlation: wind speed vs. renewable share, plotted as a scatter with a fitted trend line and the correlation coefficient, plus the same relationship over time as two stacked panels (deliberately not a dual-axis chart - see the notebook for why)
+3. `03_visualization.ipynb` - the correlation: wind speed vs. renewable share, plotted as a scatter with a fitted trend line and the correlation coefficient, plus the same relationship over time as two stacked panels (deliberately not a dual-axis chart - see the notebook for why)
+4. `04_predictive_model.ipynb` - a real regression, evaluated properly: a chronological train/test split (not a random shuffle, which would leak adjacent-hour information into training), a persistence baseline to actually beat, and a linear model chosen deliberately for how little data currently exists - not deep learning, which would just memorize noise at this size
 
 Requires the notebook extras (`pip install -r requirements.txt` already includes them) and a Jupyter kernel pointed at `.venv`:
 ```bash

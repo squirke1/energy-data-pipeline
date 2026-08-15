@@ -15,3 +15,4 @@ python-dateutil>=2.8.0
 # Optional: Stage 6 analysis notebooks (notebooks/)
 matplotlib>=3.8.0
 ipykernel>=6.29.0
+scikit-learn>=1.4.0
